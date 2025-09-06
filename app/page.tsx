@@ -16,10 +16,13 @@ class SimpleRenderer {
     this.grid = [];
     this.isMobile = window.innerWidth < 768;
     this.animationTime = 0;
+    this.causticTemplate = {};
+    this.causticResolution = 128;
     
     this.setupCanvas();
     this.setupEventListeners();
     this.initGrid();
+    this.loadOrPrecomputeCaustics();
     this.animate();
   }
 
@@ -34,6 +37,8 @@ class SimpleRenderer {
   grid: { r: number; g: number; b: number; intensity: number }[][];
   isMobile: boolean;
   animationTime: number;
+  causticTemplate: { [distance: string]: { r: number; g: number; b: number }[][] };
+  causticResolution: number;
 
   setupCanvas() {
     const rect = this.canvas.getBoundingClientRect();
@@ -132,12 +137,176 @@ class SimpleRenderer {
     }
   }
 
+  precomputeCausticTemplate() {
+    // Precompute caustics for different light distances at 0° angle (right side)
+    const centerX = this.canvas.width / 2;
+    const centerY = this.canvas.height / 2;
+    const maxDistance = Math.max(this.canvas.width, this.canvas.height);
+    
+    // Store caustics for different distances
+    for (let distance = this.sphere.radius + 100; distance <= maxDistance; distance += 50) {
+      const lightX = centerX + distance;
+      const lightY = centerY;
+      const key = distance.toString();
+      
+      this.causticTemplate[key] = this.computeCausticMap(lightX, lightY);
+    }
+    
+    // Save the first caustic map as PNG
+    this.saveCausticMapAsPNG();
+  }
+
+  saveCausticMapAsPNG() {
+    const keys = Object.keys(this.causticTemplate).sort((a, b) => Number.parseFloat(a) - Number.parseFloat(b));
+    if (keys.length === 0) return;
+    
+    // Calculate tile layout - arrange in a square grid
+    const tilesPerSide = Math.ceil(Math.sqrt(keys.length));
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = this.causticResolution * tilesPerSide;
+    tempCanvas.height = this.causticResolution * tilesPerSide;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+    
+    // Disable image smoothing for aliased (pixelated) result
+    tempCtx.imageSmoothingEnabled = false;
+    
+    const fullImageData = tempCtx.createImageData(tempCanvas.width, tempCanvas.height);
+    
+    keys.forEach((key, index) => {
+      const map = this.causticTemplate[key];
+      const tileX = index % tilesPerSide;
+      const tileY = Math.floor(index / tilesPerSide);
+      const startX = tileX * this.causticResolution;
+      const startY = tileY * this.causticResolution;
+      
+      for (let row = 0; row < this.causticResolution; row++) {
+        for (let col = 0; col < this.causticResolution; col++) {
+          const pixelX = startX + col;
+          const pixelY = startY + row;
+          const pixelIndex = (pixelY * tempCanvas.width + pixelX) * 4;
+          const caustic = map[row][col];
+          
+          fullImageData.data[pixelIndex] = Math.min(255, caustic.r * 255);     // R
+          fullImageData.data[pixelIndex + 1] = Math.min(255, caustic.g * 255); // G
+          fullImageData.data[pixelIndex + 2] = Math.min(255, caustic.b * 255); // B
+          fullImageData.data[pixelIndex + 3] = 255; // A
+        }
+      }
+    });
+    
+    tempCtx.putImageData(fullImageData, 0, 0);
+    
+    // Save metadata as JSON
+    const metadata = {
+      distances: keys.map(k => Number.parseFloat(k)),
+      tilesPerSide: tilesPerSide,
+      tileResolution: this.causticResolution,
+      canvasWidth: this.canvas.width,
+      canvasHeight: this.canvas.height,
+      sphereRadius: this.sphere.radius
+    };
+    
+    // Download atlas PNG
+    tempCanvas.toBlob((blob) => {
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'caustic_atlas.png';
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    });
+    
+    // Download metadata JSON
+    const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
+    const metadataUrl = URL.createObjectURL(metadataBlob);
+    const metadataLink = document.createElement('a');
+    metadataLink.href = metadataUrl;
+    metadataLink.download = 'caustic_metadata.json';
+    metadataLink.click();
+    URL.revokeObjectURL(metadataUrl);
+  }
+
+  computeCausticMap(lightX: number, lightY: number) {
+    const map: { r: number; g: number; b: number }[][] = [];
+    const mapWidth = this.canvas.width * 2; // Capture larger area
+    const mapHeight = this.canvas.height * 2;
+    
+    for (let row = 0; row < this.causticResolution; row++) {
+      map[row] = [];
+      for (let col = 0; col < this.causticResolution; col++) {
+        const cellX = (mapWidth / this.causticResolution) * (col + 0.5) - mapWidth/4;
+        const cellY = (mapHeight / this.causticResolution) * (row + 0.5) - mapHeight/4;
+        
+        map[row][col] = {
+          r: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.514),
+          g: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.520),
+          b: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.528)
+        };
+      }
+    }
+    
+    return map;
+  }
+
+  getCausticValue(lightX: number, lightY: number, cellX: number, cellY: number) {
+    const centerX = this.canvas.width / 2;
+    const centerY = this.canvas.height / 2;
+    
+    // Calculate light distance from sphere center
+    const lightDistance = Math.sqrt((lightX - centerX) ** 2 + (lightY - centerY) ** 2);
+    
+    // Find nearest precomputed distance
+    const distances = Object.keys(this.causticTemplate).map(k => parseFloat(k)).sort((a, b) => a - b);
+    let nearestDistance = distances[0];
+    for (const dist of distances) {
+      if (Math.abs(dist - lightDistance) < Math.abs(nearestDistance - lightDistance)) {
+        nearestDistance = dist;
+      }
+    }
+    
+    const templateKey = nearestDistance.toString();
+    if (!this.causticTemplate[templateKey]) return { r: 0, g: 0, b: 0 };
+    
+    // Rotate cell position to align with template (0° reference)
+    const lightAngle = Math.atan2(lightY - centerY, lightX - centerX);
+    const cos = Math.cos(-lightAngle);
+    const sin = Math.sin(-lightAngle);
+    
+    // Translate to sphere center, rotate, translate back to template space
+    const relX = cellX - centerX;
+    const relY = cellY - centerY;
+    const rotatedX = relX * cos - relY * sin + centerX;
+    const rotatedY = relX * sin + relY * cos + centerY;
+    
+    // Use the same mapping scale as the template was created with (2x larger area)
+    const mapWidth = this.canvas.width * 2;
+    const mapHeight = this.canvas.height * 2;
+    const mapX = Math.floor(((rotatedX + mapWidth/4) / mapWidth) * this.causticResolution);
+    const mapY = Math.floor(((rotatedY + mapHeight/4) / mapHeight) * this.causticResolution);
+    const clampedX = Math.max(0, Math.min(this.causticResolution - 1, mapX));
+    const clampedY = Math.max(0, Math.min(this.causticResolution - 1, mapY));
+    
+    return this.causticTemplate[templateKey][clampedY][clampedX];
+  }
+
   getChromaticRefraction(lightX: number, lightY: number, cellX: number, cellY: number, glassIOR: number) {
     let totalRefraction = 0;
     
-    // Shoot rays every 15 degrees (24 rays total)
-    for (let angle = 0; angle < 360; angle += 5) {
+    // Calculate angle to light source
+    const toLightAngle = Math.atan2(lightY - cellY, lightX - cellX);
+    
+    // Shoot rays from cell in directions that could theoretically reach light after refraction
+    for (let angle = 0; angle < 360; angle += 0.5) {
       const radians = (angle * Math.PI) / 180;
+      
+      // Check if ray is within ±45 degrees of light source direction
+      let angleDiff = Math.abs(radians - toLightAngle);
+      if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff; // Handle wraparound
+      if (angleDiff > Math.PI) continue; // Skip if outside ±45 degree cone (π/4 = 45°)
+      
       const rayDx = Math.cos(radians);
       const rayDy = Math.sin(radians);
       
@@ -254,15 +423,16 @@ class SimpleRenderer {
         // Calculate brightness (inverse square law) reduced by shadow
         const baseBrightness = Math.max(0, 1 / (1 + distance * 0.001));
         const brightness = baseBrightness * (1 - blockAmount);
-        this.grid[row][col].r = brightness + 0.2*this.getChromaticRefraction(this.mouse.x, this.mouse.y, cellX, cellY, 1.514); // Red light
-        this.grid[row][col].g = brightness + 0.2*this.getChromaticRefraction(this.mouse.x, this.mouse.y, cellX, cellY, 1.520); // Green light  
-        this.grid[row][col].b = brightness +  0.2*this.getChromaticRefraction(this.mouse.x, this.mouse.y, cellX, cellY, 1.528); // Blue light
+        const caustic = this.getCausticValue(this.mouse.x, this.mouse.y, cellX, cellY);
+        this.grid[row][col].r = brightness + 0.05 * caustic.r; // Red light
+        this.grid[row][col].g = brightness + 0.05 * caustic.g; // Green light  
+        this.grid[row][col].b = brightness + 0.05 * caustic.b; // Blue light
       }
     }
   }
 
   animate() {
-    this.animationTime += 0.001;
+    this.animationTime += 0.005;
     
     // Update mouse position on mobile with circular orbit pattern
     if (this.isMobile) {
