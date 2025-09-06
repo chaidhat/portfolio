@@ -1,102 +1,357 @@
+"use client";
+
 import Image from "next/image";
+import { useEffect, useRef } from "react";
+
+class SimpleRenderer {
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d')!;
+    this.mouse = { x: 0, y: 0 };
+    this.gridCols = 64;
+    this.gridRows = 64;
+    this.cellWidth = 0;
+    this.cellHeight = 0;
+    this.sphere = { x: 0, y: 0, radius: 80 };
+    this.grid = [];
+    this.isMobile = window.innerWidth < 768;
+    this.animationTime = 0;
+    
+    this.setupCanvas();
+    this.setupEventListeners();
+    this.initGrid();
+    this.animate();
+  }
+
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  mouse: { x: number; y: number };
+  gridCols: number;
+  gridRows: number;
+  cellWidth: number;
+  cellHeight: number;
+  sphere: { x: number; y: number; radius: number };
+  grid: { r: number; g: number; b: number; intensity: number }[][];
+  isMobile: boolean;
+  animationTime: number;
+
+  setupCanvas() {
+    const rect = this.canvas.getBoundingClientRect();
+    this.canvas.width = rect.width;
+    this.canvas.height = rect.height;
+    this.cellWidth = this.canvas.width / 64;
+    this.cellHeight = this.canvas.height / 64;
+    this.sphere.x = this.canvas.width / 2;
+    this.sphere.y = this.canvas.height / 2;
+  }
+
+  setupEventListeners() {
+    window.addEventListener('mousemove', (e) => {
+      if (!this.isMobile) {
+        const rect = this.canvas.getBoundingClientRect();
+        this.mouse.x = e.clientX - rect.left;
+        this.mouse.y = e.clientY - rect.top;
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      const rect = this.canvas.getBoundingClientRect();
+      this.canvas.width = rect.width;
+      this.canvas.height = rect.height;
+      this.cellWidth = this.canvas.width / 64;
+      this.cellHeight = this.canvas.height / 64;
+      this.sphere.x = this.canvas.width / 2;
+      this.sphere.y = this.canvas.height / 2;
+      this.isMobile = window.innerWidth < 768;
+      this.initGrid();
+    });
+  }
+
+  initGrid() {
+    this.grid = [];
+    
+    for (let row = 0; row < 64; row++) {
+      this.grid[row] = [];
+      for (let col = 0; col < 64; col++) {
+        this.grid[row][col] = {
+          r: 0,
+          g: 0,
+          b: 0,
+          intensity: 0
+        };
+      }
+    }
+  }
+
+  howMuchLightIsBlocked(lightX: number, lightY: number, cellX: number, cellY: number): number {
+    // Check if line from light to cell intersects with sphere
+    const dx = cellX - lightX;
+    const dy = cellY - lightY;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    
+    if (length === 0) return 0; // Same point
+    
+    // Normalize direction vector
+    const dirX = dx / length;
+    const dirY = dy / length;
+    
+    // Vector from light to sphere center
+    const sphereDx = this.sphere.x - lightX;
+    const sphereDy = this.sphere.y - lightY;
+    
+    // Project sphere center onto light ray
+    const projection = sphereDx * dirX + sphereDy * dirY;
+    
+    // If projection is negative or beyond the cell, sphere doesn't block
+    if (projection < 0 || projection > length) return 0;
+    
+    // Find closest point on ray to sphere center
+    const closestX = lightX + dirX * projection;
+    const closestY = lightY + dirY * projection;
+    
+    // Check distance from closest point to sphere center
+    const distToSphere = Math.sqrt(
+      (closestX - this.sphere.x) * (closestX - this.sphere.x) +
+      (closestY - this.sphere.y) * (closestY - this.sphere.y)
+    );
+    
+    // Smooth falloff at sphere edges
+    const sphereRadius = this.sphere.radius;
+    const softEdgeWidth = 15; // Pixels for soft edge
+    
+    if (distToSphere > sphereRadius + softEdgeWidth) {
+      return 0; // No blocking
+    } else if (distToSphere < sphereRadius - softEdgeWidth) {
+      return 1; // Full blocking
+    } else {
+      // Smooth transition using smoothstep function
+      const edgeDistance = distToSphere - (sphereRadius - softEdgeWidth);
+      const normalizedDistance = edgeDistance / (2 * softEdgeWidth);
+      const smoothed = normalizedDistance * normalizedDistance * (3 - 2 * normalizedDistance);
+      return 1 - smoothed;
+    }
+  }
+
+  getChromaticRefraction(lightX: number, lightY: number, cellX: number, cellY: number, glassIOR: number) {
+    let totalRefraction = 0;
+    
+    // Shoot rays every 15 degrees (24 rays total)
+    for (let angle = 0; angle < 360; angle += 5) {
+      const radians = (angle * Math.PI) / 180;
+      const rayDx = Math.cos(radians);
+      const rayDy = Math.sin(radians);
+      
+      // Ray-sphere intersection test from light source
+      const sphereX = this.sphere.x;
+      const sphereY = this.sphere.y;
+      const sphereRadius = this.sphere.radius;
+      
+      const toSphereX = sphereX - lightX;
+      const toSphereY = sphereY - lightY;
+      
+      const a = rayDx * rayDx + rayDy * rayDy;
+      const b = 2 * (rayDx * (-toSphereX) + rayDy * (-toSphereY));
+      const c = toSphereX * toSphereX + toSphereY * toSphereY - sphereRadius * sphereRadius;
+      
+      const discriminant = b * b - 4 * a * c;
+      
+      if (discriminant >= 0) {
+        // Ray intersects sphere
+        const t1 = (-b - Math.sqrt(discriminant)) / (2 * a);
+        const t2 = (-b + Math.sqrt(discriminant)) / (2 * a);
+        
+        if (t1 > 0) {
+          // Entry point
+          const entryX = lightX + t1 * rayDx;
+          const entryY = lightY + t1 * rayDy;
+          
+          // Normal at entry point (pointing inward)
+          const entryNormalX = (entryX - sphereX) / sphereRadius;
+          const entryNormalY = (entryY - sphereY) / sphereRadius;
+          
+          // Refract ray entering sphere (air to glass)
+          const cosTheta1 = -(rayDx * entryNormalX + rayDy * entryNormalY);
+          const theta1 = Math.acos(Math.abs(cosTheta1)) * 180 / Math.PI;
+          
+          
+          const n = 1.0 / glassIOR; // n1/n2 ratio
+          const cosTheta2Sq = 1 - n * n * (1 - cosTheta1 * cosTheta1);
+          
+          if (cosTheta2Sq >= 0) {
+            const cosTheta2 = Math.sqrt(cosTheta2Sq);
+            const refractedDx = n * rayDx + (n * cosTheta1 - cosTheta2) * entryNormalX;
+            const refractedDy = n * rayDy + (n * cosTheta1 - cosTheta2) * entryNormalY;
+            
+            // Exit point
+            const exitX = lightX + t2 * rayDx;
+            const exitY = lightY + t2 * rayDy;
+            
+            // Normal at exit point (pointing outward)
+            const exitNormalX = (exitX - sphereX) / sphereRadius;
+            const exitNormalY = (exitY - sphereY) / sphereRadius;
+            
+            // Refract ray exiting sphere (glass to air)
+            const cosTheta3 = -(refractedDx * (-exitNormalX) + refractedDy * (-exitNormalY));
+            const n2 = glassIOR; // n1/n2 ratio (glass to air)
+            const cosTheta4Sq = 1 - n2 * n2 * (1 - cosTheta3 * cosTheta3);
+            
+            if (cosTheta4Sq >= 0) {
+              const cosTheta4 = Math.sqrt(cosTheta4Sq);
+              const finalDx = n2 * refractedDx + (n2 * cosTheta3 - cosTheta4) * (-exitNormalX);
+              const finalDy = n2 * refractedDy + (n2 * cosTheta3 - cosTheta4) * (-exitNormalY);
+              
+              // Check if refracted ray passes near the cell
+              const toCellX = cellX - exitX;
+              const toCellY = cellY - exitY;
+              
+              // Calculate closest point on refracted ray to cell
+              const rayLength = Math.sqrt(finalDx * finalDx + finalDy * finalDy);
+              if (rayLength > 0) {
+                const normalizedRayDx = finalDx / rayLength;
+                const normalizedRayDy = finalDy / rayLength;
+                
+                const projectionLength = toCellX * normalizedRayDx + toCellY * normalizedRayDy;
+                
+                if (projectionLength > 0) {
+                  const closestX = exitX + projectionLength * normalizedRayDx;
+                  const closestY = exitY + projectionLength * normalizedRayDy;
+                  
+                  const distanceToRay = Math.sqrt(
+                    (cellX - closestX) * (cellX - closestX) + 
+                    (cellY - closestY) * (cellY - closestY)
+                  );
+                  
+                  // Closer to ray = more refracted light
+                  const refractionContribution = Math.max(0, 1 / (1 + distanceToRay * 0.1));
+                  totalRefraction += refractionContribution;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    return totalRefraction;
+  }
+
+
+  calculateGrid() {
+    for (let row = 0; row < 64; row++) {
+      for (let col = 0; col < 64; col++) {
+        // Get center of grid cell
+        const cellX = col * this.cellWidth + this.cellWidth / 2;
+        const cellY = row * this.cellHeight + this.cellHeight / 2;
+        
+        // Check how much light is blocked by sphere
+        const blockAmount = this.howMuchLightIsBlocked(this.mouse.x, this.mouse.y, cellX, cellY);
+        
+        // Calculate distance from cursor
+        const dx = cellX - this.mouse.x;
+        const dy = cellY - this.mouse.y;
+        const distance = Math.sqrt(dx * dx + dy * dy) * 10;
+        
+        // Calculate brightness (inverse square law) reduced by shadow
+        const baseBrightness = Math.max(0, 1 / (1 + distance * 0.001));
+        const brightness = baseBrightness * (1 - blockAmount);
+        this.grid[row][col].r = brightness + 0.2*this.getChromaticRefraction(this.mouse.x, this.mouse.y, cellX, cellY, 1.514); // Red light
+        this.grid[row][col].g = brightness + 0.2*this.getChromaticRefraction(this.mouse.x, this.mouse.y, cellX, cellY, 1.520); // Green light  
+        this.grid[row][col].b = brightness +  0.2*this.getChromaticRefraction(this.mouse.x, this.mouse.y, cellX, cellY, 1.528); // Blue light
+      }
+    }
+  }
+
+  animate() {
+    this.animationTime += 0.001;
+    
+    // Update mouse position on mobile with circular orbit pattern
+    if (this.isMobile) {
+      const centerX = this.canvas.width / 2;
+      const centerY = this.canvas.height / 2;
+      
+      // Make orbit large enough to clear the sphere
+      const minRadius = this.sphere.radius + 60; // Minimum distance from sphere center
+      const radiusX = Math.max(minRadius, 180);
+      const radiusY = Math.max(minRadius, 250);
+      
+      this.mouse.x = centerX + radiusX * Math.cos(this.animationTime);
+      this.mouse.y = centerY + radiusY * Math.sin(this.animationTime);
+    }
+    
+    // Clear canvas
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    
+    // Calculate brightness for grid
+    this.calculateGrid();
+    
+    // Render grid
+    for (let row = 0; row < 64; row++) {
+      for (let col = 0; col < 64; col++) {
+        const cell = this.grid[row][col];
+        
+        if (cell.r > 0.001 || cell.g > 0.001 || cell.b > 0.001) {
+          const cellX = col * this.cellWidth;
+          const cellY = row * this.cellHeight;
+          
+          
+          this.ctx.fillStyle = `rgba(${cell.r * 255}, ${cell.g * 255}, ${cell.b * 255}, 1)`;
+          this.ctx.fillRect(cellX, cellY, this.cellWidth, this.cellHeight);
+        }
+      }
+    }
+    
+    // Draw sphere
+    this.ctx.fillStyle = 'rgba(0,0,0, 1)';
+    this.ctx.strokeStyle = 'rgba(255, 255, 255, 1)';
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.arc(this.sphere.x, this.sphere.y, this.sphere.radius, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.stroke();
+    
+    // Draw cursor
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    this.ctx.beginPath();
+    this.ctx.arc(this.mouse.x, this.mouse.y, 3, 0, Math.PI * 2);
+    this.ctx.fill();
+    
+    requestAnimationFrame(() => this.animate());
+  }
+}
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  useEffect(() => {
+    if (canvasRef.current) {
+      new SimpleRenderer(canvasRef.current);
+    }
+  }, []);
+
+  return (
+    <div className="font-sans relative">
+      <canvas 
+        ref={canvasRef} 
+        className="fixed inset-0 w-full h-[100vh] pointer-events-none z-0"
+        style={{ cursor: 'none' }}
+      />
+      <main className="relative z-10 row-start-2 grid grid-cols-[10%_1fr]">
+        <div className="grid-cols-1 h-[200vh] bg-[repeating-linear-gradient(45deg,#e5e7eb_0px,#e5e7eb_1px,transparent_1px,transparent_20px)] border-r-1 border-[#e5e7eb]">
+        </div>
+        <div className="font-sans grid grid-rows-[1px_1fr_20px] items-start justify-items-center min-h-screen">
+          <div className="row-start-2 mt-[20%]">
+            <hr className="border-white"/>
+            <h2 className=" text-xl sm:text-2xl">Portfolio</h2>
+            <hr className="mb-8 border-white"/>
+            <hr className="border-white"/>
+            <h1 className="flex text-[12vw] leading-[10vw]">Chaidhat Chaimongkol</h1>
+            <h2 className="mt-16 text-xl sm:text-4xl">Computer Engineering @ UCLA</h2>
+            <hr className="border-white"/>
+          </div>
         </div>
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+      <footer className="relative z-10 row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
       </footer>
     </div>
   );
