@@ -18,6 +18,7 @@ class SimpleRenderer {
     this.animationTime = 0;
     this.causticTemplate = {};
     this.causticResolution = 128;
+    this.hasUserInput = false;
     
     this.setupCanvas();
     this.setupEventListeners();
@@ -39,6 +40,7 @@ class SimpleRenderer {
   animationTime: number;
   causticTemplate: { [distance: string]: { r: number; g: number; b: number }[][] };
   causticResolution: number;
+  hasUserInput: boolean;
 
   setupCanvas() {
     const rect = this.canvas.getBoundingClientRect();
@@ -48,26 +50,49 @@ class SimpleRenderer {
     this.cellHeight = this.canvas.height / 64;
     this.sphere.x = this.canvas.width / 2;
     this.sphere.y = this.canvas.height / 2;
+    this.sphere.radius = this.isMobile ? 40 : 80;
   }
 
   setupEventListeners() {
+    // Mouse events
     window.addEventListener('mousemove', (e) => {
-      if (!this.isMobile) {
-        const rect = this.canvas.getBoundingClientRect();
-        this.mouse.x = e.clientX - rect.left;
-        this.mouse.y = e.clientY - rect.top;
-      }
+      const rect = this.canvas.getBoundingClientRect();
+      this.mouse.x = e.clientX - rect.left;
+      this.mouse.y = e.clientY - rect.top;
+      this.hasUserInput = true;
     });
+    
+    // Touch events
+    window.addEventListener('touchmove', (e) => {
+      e.preventDefault(); // Prevent scrolling
+      if (e.touches.length > 0) {
+        const rect = this.canvas.getBoundingClientRect();
+        this.mouse.x = e.touches[0].clientX - rect.left;
+        this.mouse.y = e.touches[0].clientY - rect.top;
+        this.hasUserInput = true;
+      }
+    }, { passive: false });
+    
+    window.addEventListener('touchstart', (e) => {
+      e.preventDefault(); // Prevent scrolling
+      if (e.touches.length > 0) {
+        const rect = this.canvas.getBoundingClientRect();
+        this.mouse.x = e.touches[0].clientX - rect.left;
+        this.mouse.y = e.touches[0].clientY - rect.top;
+        this.hasUserInput = true;
+      }
+    }, { passive: false });
 
     window.addEventListener('resize', () => {
       const rect = this.canvas.getBoundingClientRect();
       this.canvas.width = rect.width;
       this.canvas.height = rect.height;
+      this.isMobile = window.innerWidth < 768;
       this.cellWidth = this.canvas.width / 64;
       this.cellHeight = this.canvas.height / 64;
       this.sphere.x = this.canvas.width / 2;
       this.sphere.y = this.canvas.height / 2;
-      this.isMobile = window.innerWidth < 768;
+      this.sphere.radius = this.isMobile ? 40 : 80;
       this.initGrid();
     });
   }
@@ -137,6 +162,84 @@ class SimpleRenderer {
     }
   }
 
+  async loadOrPrecomputeCaustics() {
+    try {
+      // Check if precomputed files exist
+      const [atlasResponse, metadataResponse] = await Promise.all([
+        fetch('/caustic_atlas.png', { cache: 'no-cache' }),
+        fetch('/caustic_metadata.json', { cache: 'no-cache' })
+      ]);
+      
+      if (atlasResponse.ok && metadataResponse.ok) {
+        console.log('Loading precomputed caustics...');
+        await this.loadCausticAtlas();
+      } else {
+        console.log('Precomputing caustics...');
+        this.precomputeCausticTemplate();
+      }
+    } catch (error) {
+      console.error('Failed to load precomputed caustics:', error);
+      console.log('Computing caustics instead...');
+      this.precomputeCausticTemplate();
+    }
+  }
+
+  async loadCausticAtlas() {
+    const [atlasResponse, metadataResponse] = await Promise.all([
+      fetch('/caustic_atlas.png', { cache: 'no-cache' }),
+      fetch('/caustic_metadata.json', { cache: 'no-cache' })
+    ]);
+    
+    const metadata = await metadataResponse.json();
+    const atlasImage = document.createElement('img') as HTMLImageElement;
+    atlasImage.src = URL.createObjectURL(await atlasResponse.blob());
+    
+    await new Promise<void>((resolve) => {
+      atlasImage.onload = () => resolve();
+    });
+    
+    // Create a canvas to read pixel data from the atlas
+    const canvas = document.createElement('canvas');
+    canvas.width = atlasImage.width;
+    canvas.height = atlasImage.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    ctx.drawImage(atlasImage, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    
+    // Reconstruct caustic template from atlas
+    metadata.distances.forEach((distance: number, index: number) => {
+      const tileX = index % metadata.tilesPerSide;
+      const tileY = Math.floor(index / metadata.tilesPerSide);
+      const startX = tileX * metadata.tileResolution;
+      const startY = tileY * metadata.tileResolution;
+      
+      const map: { r: number; g: number; b: number }[][] = [];
+      
+      for (let row = 0; row < metadata.tileResolution; row++) {
+        map[row] = [];
+        for (let col = 0; col < metadata.tileResolution; col++) {
+          const pixelX = startX + col;
+          const pixelY = startY + row;
+          const pixelIndex = (pixelY * canvas.width + pixelX) * 4;
+          
+          // Denormalize using saved max value
+          const maxValue = metadata.maxValue || 1;
+          map[row][col] = {
+            r: (imageData.data[pixelIndex] / 255) * maxValue,
+            g: (imageData.data[pixelIndex + 1] / 255) * maxValue,
+            b: (imageData.data[pixelIndex + 2] / 255) * maxValue
+          };
+        }
+      }
+      
+      this.causticTemplate[distance.toString()] = map;
+    });
+    
+    console.log('Loaded caustic atlas with', Object.keys(this.causticTemplate).length, 'distance maps');
+  }
+
   precomputeCausticTemplate() {
     // Precompute caustics for different light distances at 0° angle (right side)
     const centerX = this.canvas.width / 2;
@@ -159,6 +262,17 @@ class SimpleRenderer {
   saveCausticMapAsPNG() {
     const keys = Object.keys(this.causticTemplate).sort((a, b) => Number.parseFloat(a) - Number.parseFloat(b));
     if (keys.length === 0) return;
+    
+    // Find max value for normalization
+    let maxValue = 0;
+    keys.forEach(key => {
+      const map = this.causticTemplate[key];
+      for (let row = 0; row < this.causticResolution; row++) {
+        for (let col = 0; col < this.causticResolution; col++) {
+          maxValue = Math.max(maxValue, map[row][col].r, map[row][col].g, map[row][col].b);
+        }
+      }
+    });
     
     // Calculate tile layout - arrange in a square grid
     const tilesPerSide = Math.ceil(Math.sqrt(keys.length));
@@ -187,9 +301,10 @@ class SimpleRenderer {
           const pixelIndex = (pixelY * tempCanvas.width + pixelX) * 4;
           const caustic = map[row][col];
           
-          fullImageData.data[pixelIndex] = Math.min(255, caustic.r * 255);     // R
-          fullImageData.data[pixelIndex + 1] = Math.min(255, caustic.g * 255); // G
-          fullImageData.data[pixelIndex + 2] = Math.min(255, caustic.b * 255); // B
+          // Normalize to 0-255 range using max value
+          fullImageData.data[pixelIndex] = Math.floor((caustic.r / maxValue) * 255);     // R
+          fullImageData.data[pixelIndex + 1] = Math.floor((caustic.g / maxValue) * 255); // G
+          fullImageData.data[pixelIndex + 2] = Math.floor((caustic.b / maxValue) * 255); // B
           fullImageData.data[pixelIndex + 3] = 255; // A
         }
       }
@@ -204,7 +319,8 @@ class SimpleRenderer {
       tileResolution: this.causticResolution,
       canvasWidth: this.canvas.width,
       canvasHeight: this.canvas.height,
-      sphereRadius: this.sphere.radius
+      sphereRadius: this.sphere.radius,
+      maxValue: maxValue // Save normalization factor
     };
     
     // Download atlas PNG
@@ -241,9 +357,9 @@ class SimpleRenderer {
         const cellY = (mapHeight / this.causticResolution) * (row + 0.5) - mapHeight/4;
         
         map[row][col] = {
-          r: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.514),
-          g: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.520),
-          b: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.528)
+          r: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.480), // Lower for red (less refraction)
+          g: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.520), // Medium for green
+          b: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.560)  // Higher for blue (more refraction)
         };
       }
     }
@@ -259,7 +375,9 @@ class SimpleRenderer {
     const lightDistance = Math.sqrt((lightX - centerX) ** 2 + (lightY - centerY) ** 2);
     
     // Find nearest precomputed distance
-    const distances = Object.keys(this.causticTemplate).map(k => parseFloat(k)).sort((a, b) => a - b);
+    const distances = Object.keys(this.causticTemplate).map(k => Number.parseFloat(k)).sort((a, b) => a - b);
+    if (distances.length === 0) return { r: 0, g: 0, b: 0 };
+    
     let nearestDistance = distances[0];
     for (const dist of distances) {
       if (Math.abs(dist - lightDistance) < Math.abs(nearestDistance - lightDistance)) {
@@ -275,17 +393,21 @@ class SimpleRenderer {
     const cos = Math.cos(-lightAngle);
     const sin = Math.sin(-lightAngle);
     
-    // Translate to sphere center, rotate, translate back to template space
+    // Translate to sphere center, rotate
     const relX = cellX - centerX;
     const relY = cellY - centerY;
-    const rotatedX = relX * cos - relY * sin + centerX;
-    const rotatedY = relX * sin + relY * cos + centerY;
+    const rotatedX = relX * cos - relY * sin;
+    const rotatedY = relX * sin + relY * cos;
+    
+    // Don't scale caustic map by sphere radius - use direct coordinates
+    const scaledX = rotatedX + centerX;
+    const scaledY = rotatedY + centerY;
     
     // Use the same mapping scale as the template was created with (2x larger area)
     const mapWidth = this.canvas.width * 2;
     const mapHeight = this.canvas.height * 2;
-    const mapX = Math.floor(((rotatedX + mapWidth/4) / mapWidth) * this.causticResolution);
-    const mapY = Math.floor(((rotatedY + mapHeight/4) / mapHeight) * this.causticResolution);
+    const mapX = Math.floor(((scaledX + mapWidth/4) / mapWidth) * this.causticResolution);
+    const mapY = Math.floor(((scaledY + mapHeight/4) / mapHeight) * this.causticResolution);
     const clampedX = Math.max(0, Math.min(this.causticResolution - 1, mapX));
     const clampedY = Math.max(0, Math.min(this.causticResolution - 1, mapY));
     
@@ -340,7 +462,6 @@ class SimpleRenderer {
           
           // Refract ray entering sphere (air to glass)
           const cosTheta1 = -(rayDx * entryNormalX + rayDy * entryNormalY);
-          const theta1 = Math.acos(Math.abs(cosTheta1)) * 180 / Math.PI;
           
           
           const n = 1.0 / glassIOR; // n1/n2 ratio
@@ -424,9 +545,9 @@ class SimpleRenderer {
         const baseBrightness = Math.max(0, 1 / (1 + distance * 0.001));
         const brightness = baseBrightness * (1 - blockAmount);
         const caustic = this.getCausticValue(this.mouse.x, this.mouse.y, cellX, cellY);
-        this.grid[row][col].r = brightness + 0.05 * caustic.r; // Red light
-        this.grid[row][col].g = brightness + 0.05 * caustic.g; // Green light  
-        this.grid[row][col].b = brightness + 0.05 * caustic.b; // Blue light
+        this.grid[row][col].r = brightness + 0.02 * caustic.r; // Red light
+        this.grid[row][col].g = brightness + 0.02 * caustic.g; // Green light  
+        this.grid[row][col].b = brightness + 0.02 * caustic.b; // Blue light
       }
     }
   }
@@ -434,13 +555,13 @@ class SimpleRenderer {
   animate() {
     this.animationTime += 0.005;
     
-    // Update mouse position on mobile with circular orbit pattern
-    if (this.isMobile) {
+    // Auto-orbit if no user input yet
+    if (!this.hasUserInput) {
       const centerX = this.canvas.width / 2;
       const centerY = this.canvas.height / 2;
       
       // Make orbit large enough to clear the sphere
-      const minRadius = this.sphere.radius + 60; // Minimum distance from sphere center
+      const minRadius = this.sphere.radius + 60;
       const radiusX = Math.max(minRadius, 180);
       const radiusY = Math.max(minRadius, 250);
       
@@ -509,20 +630,22 @@ export default function Home() {
       <main className="relative z-10 row-start-2 grid grid-cols-[10%_1fr]">
         <div className="grid-cols-1 h-[200vh] bg-[repeating-linear-gradient(45deg,#e5e7eb_0px,#e5e7eb_1px,transparent_1px,transparent_20px)] border-r-1 border-[#e5e7eb]">
         </div>
-        <div className="font-sans grid grid-rows-[1px_1fr_20px] items-start justify-items-center min-h-screen">
-          <div className="row-start-2 mt-[20%]">
-            <hr className="border-white"/>
-            <h2 className=" text-xl sm:text-2xl">Portfolio</h2>
-            <hr className="mb-8 border-white"/>
-            <hr className="border-white"/>
-            <h1 className="flex text-[12vw] leading-[10vw]">Chaidhat Chaimongkol</h1>
-            <h2 className="mt-16 text-xl sm:text-4xl">Computer Engineering @ UCLA</h2>
-            <hr className="border-white"/>
+        <div className="font-sans grid grid-rows-[1px_1fr_20px] items-start justify-items-start min-h-screen">
+          <div className="row-start-2 mt-[5%] ml-4 text-white">
+            <h2 className="text-md">Portfolio</h2>
+            <h1 className="text-4xl pr-8">Chaidhat Chaimongkol</h1>
+            <h2 className="mt-8  text-xl">Computer Engineering @ UCLA</h2>
+            <a href="https://github.com/chaidhat" className="block mt-16 text-xl underline">My Projects</a>
+            <a href="https://www.linkedin.com/in/chaidhat/" className="block mt-4  text-xl underline">LinkedIn</a>
+            <a href="mailto:chaimongkol@ucla.edu" className="block mt-4  text-xl underline">Email</a>
           </div>
         </div>
       </main>
       <footer className="relative z-10 row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
       </footer>
+      <div className="fixed bottom-4 right-4 z-20">
+        <h2 className="text-sm sm:text-base text-white">A simulation of caustic effect of a glass ball. Move your cursor or touch the screen to interact.</h2>
+      </div>
     </div>
   );
 }
