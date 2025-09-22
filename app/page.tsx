@@ -1,637 +1,187 @@
 "use client";
 
-import Image from "next/image";
-import { useEffect, useRef } from "react";
-
-class SimpleRenderer {
-  constructor(canvas: HTMLCanvasElement) {
-    this.canvas = canvas;
-    this.ctx = canvas.getContext('2d')!;
-    this.mouse = { x: 0, y: 0 };
-    this.gridCols = 64;
-    this.gridRows = 64;
-    this.cellWidth = 0;
-    this.cellHeight = 0;
-    this.sphere = { x: 0, y: 0, radius: 80 };
-    this.grid = [];
-    this.isMobile = window.innerWidth < 768;
-    this.animationTime = 0;
-    this.causticTemplate = {};
-    this.causticResolution = 128;
-    this.hasUserInput = false;
-    
-    this.setupCanvas();
-    this.setupEventListeners();
-    this.initGrid();
-    this.loadOrPrecomputeCaustics();
-    this.animate();
-  }
-
-  canvas: HTMLCanvasElement;
-  ctx: CanvasRenderingContext2D;
-  mouse: { x: number; y: number };
-  gridCols: number;
-  gridRows: number;
-  cellWidth: number;
-  cellHeight: number;
-  sphere: { x: number; y: number; radius: number };
-  grid: { r: number; g: number; b: number; intensity: number }[][];
-  isMobile: boolean;
-  animationTime: number;
-  causticTemplate: { [distance: string]: { r: number; g: number; b: number }[][] };
-  causticResolution: number;
-  hasUserInput: boolean;
-
-  setupCanvas() {
-    const rect = this.canvas.getBoundingClientRect();
-    this.canvas.width = rect.width;
-    this.canvas.height = rect.height;
-    this.cellWidth = this.canvas.width / 64;
-    this.cellHeight = this.canvas.height / 64;
-    this.sphere.x = this.canvas.width / 2;
-    this.sphere.y = this.canvas.height / 2;
-    this.sphere.radius = this.isMobile ? 40 : 80;
-  }
-
-  setupEventListeners() {
-    // Mouse events
-    window.addEventListener('mousemove', (e) => {
-      const rect = this.canvas.getBoundingClientRect();
-      this.mouse.x = e.clientX - rect.left;
-      this.mouse.y = e.clientY - rect.top;
-      this.hasUserInput = true;
-    });
-    
-    // Touch events
-    window.addEventListener('touchmove', (e) => {
-      e.preventDefault(); // Prevent scrolling
-      if (e.touches.length > 0) {
-        const rect = this.canvas.getBoundingClientRect();
-        this.mouse.x = e.touches[0].clientX - rect.left;
-        this.mouse.y = e.touches[0].clientY - rect.top;
-        this.hasUserInput = true;
-      }
-    }, { passive: false });
-    
-    window.addEventListener('touchstart', (e) => {
-      e.preventDefault(); // Prevent scrolling
-      if (e.touches.length > 0) {
-        const rect = this.canvas.getBoundingClientRect();
-        this.mouse.x = e.touches[0].clientX - rect.left;
-        this.mouse.y = e.touches[0].clientY - rect.top;
-        this.hasUserInput = true;
-      }
-    }, { passive: false });
-
-    window.addEventListener('resize', () => {
-      const rect = this.canvas.getBoundingClientRect();
-      this.canvas.width = rect.width;
-      this.canvas.height = rect.height;
-      this.isMobile = window.innerWidth < 768;
-      this.cellWidth = this.canvas.width / 64;
-      this.cellHeight = this.canvas.height / 64;
-      this.sphere.x = this.canvas.width / 2;
-      this.sphere.y = this.canvas.height / 2;
-      this.sphere.radius = this.isMobile ? 40 : 80;
-      this.initGrid();
-    });
-  }
-
-  initGrid() {
-    this.grid = [];
-    
-    for (let row = 0; row < 64; row++) {
-      this.grid[row] = [];
-      for (let col = 0; col < 64; col++) {
-        this.grid[row][col] = {
-          r: 0,
-          g: 0,
-          b: 0,
-          intensity: 0
-        };
-      }
-    }
-  }
-
-  howMuchLightIsBlocked(lightX: number, lightY: number, cellX: number, cellY: number): number {
-    // Check if line from light to cell intersects with sphere
-    const dx = cellX - lightX;
-    const dy = cellY - lightY;
-    const length = Math.sqrt(dx * dx + dy * dy);
-    
-    if (length === 0) return 0; // Same point
-    
-    // Normalize direction vector
-    const dirX = dx / length;
-    const dirY = dy / length;
-    
-    // Vector from light to sphere center
-    const sphereDx = this.sphere.x - lightX;
-    const sphereDy = this.sphere.y - lightY;
-    
-    // Project sphere center onto light ray
-    const projection = sphereDx * dirX + sphereDy * dirY;
-    
-    // If projection is negative or beyond the cell, sphere doesn't block
-    if (projection < 0 || projection > length) return 0;
-    
-    // Find closest point on ray to sphere center
-    const closestX = lightX + dirX * projection;
-    const closestY = lightY + dirY * projection;
-    
-    // Check distance from closest point to sphere center
-    const distToSphere = Math.sqrt(
-      (closestX - this.sphere.x) * (closestX - this.sphere.x) +
-      (closestY - this.sphere.y) * (closestY - this.sphere.y)
-    );
-    
-    // Smooth falloff at sphere edges
-    const sphereRadius = this.sphere.radius;
-    const softEdgeWidth = 15; // Pixels for soft edge
-    
-    if (distToSphere > sphereRadius + softEdgeWidth) {
-      return 0; // No blocking
-    } else if (distToSphere < sphereRadius - softEdgeWidth) {
-      return 1; // Full blocking
-    } else {
-      // Smooth transition using smoothstep function
-      const edgeDistance = distToSphere - (sphereRadius - softEdgeWidth);
-      const normalizedDistance = edgeDistance / (2 * softEdgeWidth);
-      const smoothed = normalizedDistance * normalizedDistance * (3 - 2 * normalizedDistance);
-      return 1 - smoothed;
-    }
-  }
-
-  async loadOrPrecomputeCaustics() {
-    try {
-      // Check if precomputed files exist
-      const [atlasResponse, metadataResponse] = await Promise.all([
-        fetch('/caustic_atlas.png', { cache: 'no-cache' }),
-        fetch('/caustic_metadata.json', { cache: 'no-cache' })
-      ]);
-      
-      if (atlasResponse.ok && metadataResponse.ok) {
-        console.log('Loading precomputed caustics...');
-        await this.loadCausticAtlas();
-      } else {
-        console.log('Precomputing caustics...');
-        this.precomputeCausticTemplate();
-      }
-    } catch (error) {
-      console.error('Failed to load precomputed caustics:', error);
-      console.log('Computing caustics instead...');
-      this.precomputeCausticTemplate();
-    }
-  }
-
-  async loadCausticAtlas() {
-    const [atlasResponse, metadataResponse] = await Promise.all([
-      fetch('/caustic_atlas.png', { cache: 'no-cache' }),
-      fetch('/caustic_metadata.json', { cache: 'no-cache' })
-    ]);
-    
-    const metadata = await metadataResponse.json();
-    const atlasImage = document.createElement('img') as HTMLImageElement;
-    atlasImage.src = URL.createObjectURL(await atlasResponse.blob());
-    
-    await new Promise<void>((resolve) => {
-      atlasImage.onload = () => resolve();
-    });
-    
-    // Create a canvas to read pixel data from the atlas
-    const canvas = document.createElement('canvas');
-    canvas.width = atlasImage.width;
-    canvas.height = atlasImage.height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    ctx.drawImage(atlasImage, 0, 0);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    
-    // Reconstruct caustic template from atlas
-    metadata.distances.forEach((distance: number, index: number) => {
-      const tileX = index % metadata.tilesPerSide;
-      const tileY = Math.floor(index / metadata.tilesPerSide);
-      const startX = tileX * metadata.tileResolution;
-      const startY = tileY * metadata.tileResolution;
-      
-      const map: { r: number; g: number; b: number }[][] = [];
-      
-      for (let row = 0; row < metadata.tileResolution; row++) {
-        map[row] = [];
-        for (let col = 0; col < metadata.tileResolution; col++) {
-          const pixelX = startX + col;
-          const pixelY = startY + row;
-          const pixelIndex = (pixelY * canvas.width + pixelX) * 4;
-          
-          // Denormalize using saved max value
-          const maxValue = metadata.maxValue || 1;
-          map[row][col] = {
-            r: (imageData.data[pixelIndex] / 255) * maxValue,
-            g: (imageData.data[pixelIndex + 1] / 255) * maxValue,
-            b: (imageData.data[pixelIndex + 2] / 255) * maxValue
-          };
-        }
-      }
-      
-      this.causticTemplate[distance.toString()] = map;
-    });
-    
-    console.log('Loaded caustic atlas with', Object.keys(this.causticTemplate).length, 'distance maps');
-  }
-
-  precomputeCausticTemplate() {
-    // Precompute caustics for different light distances at 0° angle (right side)
-    const centerX = this.canvas.width / 2;
-    const centerY = this.canvas.height / 2;
-    const maxDistance = Math.max(this.canvas.width, this.canvas.height);
-    
-    // Store caustics for different distances
-    for (let distance = this.sphere.radius + 100; distance <= maxDistance; distance += 50) {
-      const lightX = centerX + distance;
-      const lightY = centerY;
-      const key = distance.toString();
-      
-      this.causticTemplate[key] = this.computeCausticMap(lightX, lightY);
-    }
-    
-    // Save the first caustic map as PNG
-    this.saveCausticMapAsPNG();
-  }
-
-  saveCausticMapAsPNG() {
-    const keys = Object.keys(this.causticTemplate).sort((a, b) => Number.parseFloat(a) - Number.parseFloat(b));
-    if (keys.length === 0) return;
-    
-    // Find max value for normalization
-    let maxValue = 0;
-    keys.forEach(key => {
-      const map = this.causticTemplate[key];
-      for (let row = 0; row < this.causticResolution; row++) {
-        for (let col = 0; col < this.causticResolution; col++) {
-          maxValue = Math.max(maxValue, map[row][col].r, map[row][col].g, map[row][col].b);
-        }
-      }
-    });
-    
-    // Calculate tile layout - arrange in a square grid
-    const tilesPerSide = Math.ceil(Math.sqrt(keys.length));
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = this.causticResolution * tilesPerSide;
-    tempCanvas.height = this.causticResolution * tilesPerSide;
-    const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) return;
-    
-    // Disable image smoothing for aliased (pixelated) result
-    tempCtx.imageSmoothingEnabled = false;
-    
-    const fullImageData = tempCtx.createImageData(tempCanvas.width, tempCanvas.height);
-    
-    keys.forEach((key, index) => {
-      const map = this.causticTemplate[key];
-      const tileX = index % tilesPerSide;
-      const tileY = Math.floor(index / tilesPerSide);
-      const startX = tileX * this.causticResolution;
-      const startY = tileY * this.causticResolution;
-      
-      for (let row = 0; row < this.causticResolution; row++) {
-        for (let col = 0; col < this.causticResolution; col++) {
-          const pixelX = startX + col;
-          const pixelY = startY + row;
-          const pixelIndex = (pixelY * tempCanvas.width + pixelX) * 4;
-          const caustic = map[row][col];
-          
-          // Normalize to 0-255 range using max value
-          fullImageData.data[pixelIndex] = Math.floor((caustic.r / maxValue) * 255);     // R
-          fullImageData.data[pixelIndex + 1] = Math.floor((caustic.g / maxValue) * 255); // G
-          fullImageData.data[pixelIndex + 2] = Math.floor((caustic.b / maxValue) * 255); // B
-          fullImageData.data[pixelIndex + 3] = 255; // A
-        }
-      }
-    });
-    
-    tempCtx.putImageData(fullImageData, 0, 0);
-    
-    // Save metadata as JSON
-    const metadata = {
-      distances: keys.map(k => Number.parseFloat(k)),
-      tilesPerSide: tilesPerSide,
-      tileResolution: this.causticResolution,
-      canvasWidth: this.canvas.width,
-      canvasHeight: this.canvas.height,
-      sphereRadius: this.sphere.radius,
-      maxValue: maxValue // Save normalization factor
-    };
-    
-    // Download atlas PNG
-    tempCanvas.toBlob((blob) => {
-      if (blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'caustic_atlas.png';
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    });
-    
-    // Download metadata JSON
-    const metadataBlob = new Blob([JSON.stringify(metadata, null, 2)], { type: 'application/json' });
-    const metadataUrl = URL.createObjectURL(metadataBlob);
-    const metadataLink = document.createElement('a');
-    metadataLink.href = metadataUrl;
-    metadataLink.download = 'caustic_metadata.json';
-    metadataLink.click();
-    URL.revokeObjectURL(metadataUrl);
-  }
-
-  computeCausticMap(lightX: number, lightY: number) {
-    const map: { r: number; g: number; b: number }[][] = [];
-    const mapWidth = this.canvas.width * 2; // Capture larger area
-    const mapHeight = this.canvas.height * 2;
-    
-    for (let row = 0; row < this.causticResolution; row++) {
-      map[row] = [];
-      for (let col = 0; col < this.causticResolution; col++) {
-        const cellX = (mapWidth / this.causticResolution) * (col + 0.5) - mapWidth/4;
-        const cellY = (mapHeight / this.causticResolution) * (row + 0.5) - mapHeight/4;
-        
-        map[row][col] = {
-          r: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.480), // Lower for red (less refraction)
-          g: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.520), // Medium for green
-          b: this.getChromaticRefraction(lightX, lightY, cellX, cellY, 1.560)  // Higher for blue (more refraction)
-        };
-      }
-    }
-    
-    return map;
-  }
-
-  getCausticValue(lightX: number, lightY: number, cellX: number, cellY: number) {
-    const centerX = this.canvas.width / 2;
-    const centerY = this.canvas.height / 2;
-    
-    // Calculate light distance from sphere center
-    const lightDistance = Math.sqrt((lightX - centerX) ** 2 + (lightY - centerY) ** 2);
-    
-    // Find nearest precomputed distance
-    const distances = Object.keys(this.causticTemplate).map(k => Number.parseFloat(k)).sort((a, b) => a - b);
-    if (distances.length === 0) return { r: 0, g: 0, b: 0 };
-    
-    let nearestDistance = distances[0];
-    for (const dist of distances) {
-      if (Math.abs(dist - lightDistance) < Math.abs(nearestDistance - lightDistance)) {
-        nearestDistance = dist;
-      }
-    }
-    
-    const templateKey = nearestDistance.toString();
-    if (!this.causticTemplate[templateKey]) return { r: 0, g: 0, b: 0 };
-    
-    // Rotate cell position to align with template (0° reference)
-    const lightAngle = Math.atan2(lightY - centerY, lightX - centerX);
-    const cos = Math.cos(-lightAngle);
-    const sin = Math.sin(-lightAngle);
-    
-    // Translate to sphere center, rotate
-    const relX = cellX - centerX;
-    const relY = cellY - centerY;
-    const rotatedX = relX * cos - relY * sin;
-    const rotatedY = relX * sin + relY * cos;
-    
-    // Don't scale caustic map by sphere radius - use direct coordinates
-    const scaledX = rotatedX + centerX;
-    const scaledY = rotatedY + centerY;
-    
-    // Use the same mapping scale as the template was created with (2x larger area)
-    const mapWidth = this.canvas.width * 2;
-    const mapHeight = this.canvas.height * 2;
-    const mapX = Math.floor(((scaledX + mapWidth/4) / mapWidth) * this.causticResolution);
-    const mapY = Math.floor(((scaledY + mapHeight/4) / mapHeight) * this.causticResolution);
-    const clampedX = Math.max(0, Math.min(this.causticResolution - 1, mapX));
-    const clampedY = Math.max(0, Math.min(this.causticResolution - 1, mapY));
-    
-    return this.causticTemplate[templateKey][clampedY][clampedX];
-  }
-
-  getChromaticRefraction(lightX: number, lightY: number, cellX: number, cellY: number, glassIOR: number) {
-    let totalRefraction = 0;
-    
-    // Calculate angle to light source
-    const toLightAngle = Math.atan2(lightY - cellY, lightX - cellX);
-    
-    // Shoot rays from cell in directions that could theoretically reach light after refraction
-    for (let angle = 0; angle < 360; angle += 0.5) {
-      const radians = (angle * Math.PI) / 180;
-      
-      // Check if ray is within ±45 degrees of light source direction
-      let angleDiff = Math.abs(radians - toLightAngle);
-      if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff; // Handle wraparound
-      if (angleDiff > Math.PI) continue; // Skip if outside ±45 degree cone (π/4 = 45°)
-      
-      const rayDx = Math.cos(radians);
-      const rayDy = Math.sin(radians);
-      
-      // Ray-sphere intersection test from light source
-      const sphereX = this.sphere.x;
-      const sphereY = this.sphere.y;
-      const sphereRadius = this.sphere.radius;
-      
-      const toSphereX = sphereX - lightX;
-      const toSphereY = sphereY - lightY;
-      
-      const a = rayDx * rayDx + rayDy * rayDy;
-      const b = 2 * (rayDx * (-toSphereX) + rayDy * (-toSphereY));
-      const c = toSphereX * toSphereX + toSphereY * toSphereY - sphereRadius * sphereRadius;
-      
-      const discriminant = b * b - 4 * a * c;
-      
-      if (discriminant >= 0) {
-        // Ray intersects sphere
-        const t1 = (-b - Math.sqrt(discriminant)) / (2 * a);
-        const t2 = (-b + Math.sqrt(discriminant)) / (2 * a);
-        
-        if (t1 > 0) {
-          // Entry point
-          const entryX = lightX + t1 * rayDx;
-          const entryY = lightY + t1 * rayDy;
-          
-          // Normal at entry point (pointing inward)
-          const entryNormalX = (entryX - sphereX) / sphereRadius;
-          const entryNormalY = (entryY - sphereY) / sphereRadius;
-          
-          // Refract ray entering sphere (air to glass)
-          const cosTheta1 = -(rayDx * entryNormalX + rayDy * entryNormalY);
-          
-          
-          const n = 1.0 / glassIOR; // n1/n2 ratio
-          const cosTheta2Sq = 1 - n * n * (1 - cosTheta1 * cosTheta1);
-          
-          if (cosTheta2Sq >= 0) {
-            const cosTheta2 = Math.sqrt(cosTheta2Sq);
-            const refractedDx = n * rayDx + (n * cosTheta1 - cosTheta2) * entryNormalX;
-            const refractedDy = n * rayDy + (n * cosTheta1 - cosTheta2) * entryNormalY;
-            
-            // Exit point
-            const exitX = lightX + t2 * rayDx;
-            const exitY = lightY + t2 * rayDy;
-            
-            // Normal at exit point (pointing outward)
-            const exitNormalX = (exitX - sphereX) / sphereRadius;
-            const exitNormalY = (exitY - sphereY) / sphereRadius;
-            
-            // Refract ray exiting sphere (glass to air)
-            const cosTheta3 = -(refractedDx * (-exitNormalX) + refractedDy * (-exitNormalY));
-            const n2 = glassIOR; // n1/n2 ratio (glass to air)
-            const cosTheta4Sq = 1 - n2 * n2 * (1 - cosTheta3 * cosTheta3);
-            
-            if (cosTheta4Sq >= 0) {
-              const cosTheta4 = Math.sqrt(cosTheta4Sq);
-              const finalDx = n2 * refractedDx + (n2 * cosTheta3 - cosTheta4) * (-exitNormalX);
-              const finalDy = n2 * refractedDy + (n2 * cosTheta3 - cosTheta4) * (-exitNormalY);
-              
-              // Check if refracted ray passes near the cell
-              const toCellX = cellX - exitX;
-              const toCellY = cellY - exitY;
-              
-              // Calculate closest point on refracted ray to cell
-              const rayLength = Math.sqrt(finalDx * finalDx + finalDy * finalDy);
-              if (rayLength > 0) {
-                const normalizedRayDx = finalDx / rayLength;
-                const normalizedRayDy = finalDy / rayLength;
-                
-                const projectionLength = toCellX * normalizedRayDx + toCellY * normalizedRayDy;
-                
-                if (projectionLength > 0) {
-                  const closestX = exitX + projectionLength * normalizedRayDx;
-                  const closestY = exitY + projectionLength * normalizedRayDy;
-                  
-                  const distanceToRay = Math.sqrt(
-                    (cellX - closestX) * (cellX - closestX) + 
-                    (cellY - closestY) * (cellY - closestY)
-                  );
-                  
-                  // Closer to ray = more refracted light
-                  const refractionContribution = Math.max(0, 1 / (1 + distanceToRay * 0.1));
-                  totalRefraction += refractionContribution;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    return totalRefraction;
-  }
-
-
-  calculateGrid() {
-    for (let row = 0; row < 64; row++) {
-      for (let col = 0; col < 64; col++) {
-        // Get center of grid cell
-        const cellX = col * this.cellWidth + this.cellWidth / 2;
-        const cellY = row * this.cellHeight + this.cellHeight / 2;
-        
-        // Check how much light is blocked by sphere
-        const blockAmount = this.howMuchLightIsBlocked(this.mouse.x, this.mouse.y, cellX, cellY);
-        
-        // Calculate distance from cursor
-        const dx = cellX - this.mouse.x;
-        const dy = cellY - this.mouse.y;
-        const distance = Math.sqrt(dx * dx + dy * dy) * 10;
-        
-        // Calculate brightness (inverse square law) reduced by shadow
-        const baseBrightness = Math.max(0, 1 / (1 + distance * 0.001));
-        const brightness = baseBrightness * (1 - blockAmount);
-        const caustic = this.getCausticValue(this.mouse.x, this.mouse.y, cellX, cellY);
-        this.grid[row][col].r = brightness + 0.02 * caustic.r; // Red light
-        this.grid[row][col].g = brightness + 0.02 * caustic.g; // Green light  
-        this.grid[row][col].b = brightness + 0.02 * caustic.b; // Blue light
-      }
-    }
-  }
-
-  animate() {
-    this.animationTime += 0.005;
-    
-    // Auto-orbit if no user input yet
-    if (!this.hasUserInput) {
-      const centerX = this.canvas.width / 2;
-      const centerY = this.canvas.height / 2;
-      
-      // Make orbit large enough to clear the sphere
-      const minRadius = this.sphere.radius + 60;
-      const radiusX = Math.max(minRadius, 180);
-      const radiusY = Math.max(minRadius, 250);
-      
-      this.mouse.x = centerX + radiusX * Math.cos(this.animationTime);
-      this.mouse.y = centerY + radiusY * Math.sin(this.animationTime);
-    }
-    
-    // Clear canvas
-    this.ctx.fillStyle = 'rgba(0, 0, 0, 1)';
-    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    
-    // Calculate brightness for grid
-    this.calculateGrid();
-    
-    // Render grid
-    for (let row = 0; row < 64; row++) {
-      for (let col = 0; col < 64; col++) {
-        const cell = this.grid[row][col];
-        
-        if (cell.r > 0.001 || cell.g > 0.001 || cell.b > 0.001) {
-          const cellX = col * this.cellWidth;
-          const cellY = row * this.cellHeight;
-          
-          
-          this.ctx.fillStyle = `rgba(${cell.r * 255}, ${cell.g * 255}, ${cell.b * 255}, 1)`;
-          this.ctx.fillRect(cellX, cellY, this.cellWidth, this.cellHeight);
-        }
-      }
-    }
-    
-    // Draw sphere
-    this.ctx.fillStyle = 'rgba(0,0,0, 1)';
-    this.ctx.strokeStyle = 'rgba(255, 255, 255, 1)';
-    this.ctx.lineWidth = 2;
-    this.ctx.beginPath();
-    this.ctx.arc(this.sphere.x, this.sphere.y, this.sphere.radius, 0, Math.PI * 2);
-    this.ctx.fill();
-    this.ctx.stroke();
-    
-    // Draw cursor
-    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-    this.ctx.beginPath();
-    this.ctx.arc(this.mouse.x, this.mouse.y, 3, 0, Math.PI * 2);
-    this.ctx.fill();
-    
-    requestAnimationFrame(() => this.animate());
-  }
-}
+import { useRef, useEffect, useState } from "react";
 
 export default function Home() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [redCoeff, setRedCoeff] = useState(1);
+  const [greenCoeff, setGreenCoeff] = useState(1);
+  const [blueCoeff, setBlueCoeff] = useState(1);
+  const [yIntercept, setYIntercept] = useState(1000);
+
+  // Simple Perlin noise implementation
+  const noise = (() => {
+    const p = new Array(512);
+    const permutation = [151, 160, 137, 91, 90, 15, 131, 13, 201, 95, 96, 53, 194, 233, 7, 225, 140, 36, 103, 30, 69, 142, 8, 99, 37, 240, 21, 10, 23, 190, 6, 148, 247, 120, 234, 75, 0, 26, 197, 62, 94, 252, 219, 203, 117, 35, 11, 32, 57, 177, 33, 88, 237, 149, 56, 87, 174, 20, 125, 136, 171, 168, 68, 175, 74, 165, 71, 134, 139, 48, 27, 166, 77, 146, 158, 231, 83, 111, 229, 122, 60, 211, 133, 230, 220, 105, 92, 41, 55, 46, 245, 40, 244, 102, 143, 54, 65, 25, 63, 161, 1, 216, 80, 73, 209, 76, 132, 187, 208, 89, 18, 169, 200, 196, 135, 130, 116, 188, 159, 86, 164, 100, 109, 198, 173, 186, 3, 64, 52, 217, 226, 250, 124, 123, 5, 202, 38, 147, 118, 126, 255, 82, 85, 212, 207, 206, 59, 227, 47, 16, 58, 17, 182, 189, 28, 42, 223, 183, 170, 213, 119, 248, 152, 2, 44, 154, 163, 70, 221, 153, 101, 155, 167, 43, 172, 9, 129, 22, 39, 253, 19, 98, 108, 110, 79, 113, 224, 232, 178, 185, 112, 104, 218, 246, 97, 228, 251, 34, 242, 193, 238, 210, 144, 12, 191, 179, 162, 241, 81, 51, 145, 235, 249, 14, 239, 107, 49, 192, 214, 31, 181, 199, 106, 157, 184, 84, 204, 176, 115, 121, 50, 45, 127, 4, 150, 254, 138, 236, 205, 93, 222, 114, 67, 29, 24, 72, 243, 141, 128, 195, 78, 66, 215, 61, 156, 180];
+
+    for (let i = 0; i < 256; i++) {
+      p[256 + i] = p[i] = permutation[i];
+    }
+
+    const fade = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
+    const lerp = (t: number, a: number, b: number) => a + t * (b - a);
+    const grad = (hash: number, x: number, y: number) => {
+      const h = hash & 15;
+      const u = h < 8 ? x : y;
+      const v = h < 4 ? y : h === 12 || h === 14 ? x : 0;
+      return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+    };
+
+    return (x: number, y: number) => {
+      const X = Math.floor(x) & 255;
+      const Y = Math.floor(y) & 255;
+      x -= Math.floor(x);
+      y -= Math.floor(y);
+      const u = fade(x);
+      const v = fade(y);
+      const A = p[X] + Y;
+      const AA = p[A];
+      const AB = p[A + 1];
+      const B = p[X + 1] + Y;
+      const BA = p[B];
+      const BB = p[B + 1];
+
+      return lerp(v, lerp(u, grad(p[AA], x, y), grad(p[BA], x - 1, y)),
+        lerp(u, grad(p[AB], x, y - 1), grad(p[BB], x - 1, y - 1)));
+    };
+  })();
+
+  const kelvinToRGB = (kelvin: number) => {
+    const temp = kelvin / 100;
+    let red, green, blue;
+
+    // Red component
+    if (temp <= 66) {
+      red = 255;
+    } else {
+      red = temp - 60;
+      red = 329.698727446 * Math.pow(red, -0.1332047592);
+      red = Math.max(0, Math.min(255, red));
+    }
+
+    // Green component
+    if (temp <= 66) {
+      green = temp;
+      green = 99.4708025861 * Math.log(green) - 161.1195681661;
+    } else {
+      green = temp - 60;
+      green = 288.1221695283 * Math.pow(green, -0.0755148492);
+    }
+    green = Math.max(0, Math.min(255, green));
+
+    // Blue component
+    if (temp >= 66) {
+      blue = 255;
+    } else if (temp <= 19) {
+      blue = 0;
+    } else {
+      blue = temp - 10;
+      blue = 138.5177312231 * Math.log(blue) - 305.0447927307;
+      blue = Math.max(0, Math.min(255, blue));
+    }
+
+    return { r: Math.round(red), g: Math.round(green), b: Math.round(blue) };
+  };
+
+  // Animate sliders
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRedCoeff(prev => {
+        const change = (Math.random() - 0.5) * 0.01; // Random direction, 0.05 magnitude
+        return Math.max(0.5, Math.min(1.5, prev + change));
+      });
+      setGreenCoeff(prev => {
+        const change = (Math.random() - 0.5) * 0.01;
+        return Math.max(0.5, Math.min(1.5, prev + change));
+      });
+      setBlueCoeff(prev => {
+        const change = (Math.random() - 0.5) * 0.01;
+        return Math.max(0.5, Math.min(1.5, prev + change));
+      });
+      setYIntercept(prev => {
+        const change = (Math.random() - 0.5) * 200; // Random direction, 100 magnitude
+        return Math.max(500, Math.min(3000, prev + change));
+      });
+    }, 1000 / 10); // 1/15th of a second
+
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     if (canvasRef.current) {
-      new SimpleRenderer(canvasRef.current);
+      const canvas = canvasRef.current;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Set canvas size
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+
+      // Create image data for pixel manipulation
+      const imageData = ctx.createImageData(canvas.width, canvas.height);
+      const data = imageData.data;
+
+      // Render temperature with radial gradient from bottom left to top right
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          const index = (y * canvas.width + x) * 4;
+
+          // Calculate distance from bottom left corner (0, canvas.height) to current pixel
+          const dx = x;
+          const dy = canvas.height - y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          // Calculate maximum possible distance (bottom left to top right)
+          const maxDistance = Math.sqrt(canvas.width * canvas.width + canvas.height * canvas.height);
+
+          // Normalize distance to 0-1 range
+          const normalizedDistance = distance / maxDistance;
+
+          // Apply smoothstep function for smoother gradient
+          const smoothed = normalizedDistance * normalizedDistance * (3 - 2 * normalizedDistance);
+
+          // Add random noise per pixel
+          const randomNoise = (Math.random() - 0.5) * 2; // Random value between -1 and 1
+          const noiseIntensity = 0.1; // How much noise affects the gradient
+
+          // Combine gradient with noise
+          const factor = smoothed + (randomNoise * noiseIntensity);
+          const clampedFactor = Math.max(0, Math.min(1, factor));
+
+          // Map to temperature range using y-intercept
+          const kelvin = yIntercept + (clampedFactor * 7000);
+
+          // Get RGB from temperature
+          const color = kelvinToRGB(kelvin);
+
+          // Apply RGB coefficients
+          data[index] = Math.min(255, color.r * redCoeff);     // Red component
+          data[index + 1] = Math.min(255, color.g * greenCoeff); // Green component
+          data[index + 2] = Math.min(255, color.b * blueCoeff); // Blue component
+          data[index + 3] = 255;     // Alpha (fully opaque)
+        }
+      }
+
+      // Put the image data onto the canvas
+      ctx.putImageData(imageData, 0, 0);
     }
-  }, []);
+  }, [redCoeff, greenCoeff, blueCoeff, yIntercept]);
 
   return (
     <div className="font-sans relative">
-      <canvas 
-        ref={canvasRef} 
+      <canvas
+        ref={canvasRef}
         className="fixed inset-0 w-full h-[100vh] pointer-events-none z-0"
         style={{ cursor: 'none' }}
       />
+
+
       <main className="relative z-10 row-start-2 grid grid-cols-[10%_1fr]">
-        <div className="grid-cols-1 h-[200vh] bg-[repeating-linear-gradient(45deg,#e5e7eb_0px,#e5e7eb_1px,transparent_1px,transparent_20px)] border-r-1 border-[#e5e7eb]">
+        <div className="grid-cols-1 h-[200vh] bg-[repeating-linear-gradient(45deg,#000000_0px,#000000_1px,transparent_1px,transparent_20px)] border-r-1 border-[#000000]">
         </div>
         <div className="font-sans grid grid-rows-[1px_1fr_20px] items-start justify-items-start min-h-screen">
-          <div className="row-start-2 mt-[5%] ml-4 text-white">
+          <div className="row-start-2 mt-[5%] ml-4 text-black">
             <h2 className="text-md">Portfolio</h2>
             <h1 className="text-4xl pr-8">Chaidhat Chaimongkol</h1>
             <h2 className="mt-8  text-xl">Computer Engineering @ UCLA</h2>
