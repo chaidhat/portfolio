@@ -51,6 +51,9 @@ let rotationMatrix = [
 let isDragging = false;
 let lastMouseX = 0;
 let lastMouseY = 0;
+let velocityX = 0;
+let velocityY = 0;
+const friction = 0.95;
 
 // Multiply two 3x3 matrices
 function multiplyMatrices(a, b) {
@@ -255,11 +258,20 @@ function render() {
 
     // Update rotation (only when not dragging)
     if (!isDragging) {
+        // Apply friction to drag momentum
+        velocityX *= friction;
+        velocityY *= friction;
+
+        // Apply drag momentum
+        const rotY = rotationMatrixY(-velocityX);
+        const rotX = rotationMatrixX(velocityY);
+        rotationMatrix = multiplyMatrices(rotY, rotationMatrix);
+        rotationMatrix = multiplyMatrices(rotX, rotationMatrix);
+
+        // Always apply auto-rotation
         const autoRotX = rotationMatrixX(0.02);
-        const autoRotY = rotationMatrixY(0);
         const autoRotZ = rotationMatrixZ(0.02);
         rotationMatrix = multiplyMatrices(autoRotX, rotationMatrix);
-        rotationMatrix = multiplyMatrices(autoRotY, rotationMatrix);
         rotationMatrix = multiplyMatrices(autoRotZ, rotationMatrix);
     }
 
@@ -317,9 +329,13 @@ document.addEventListener('mousemove', (e) => {
     const deltaX = e.clientX - lastMouseX;
     const deltaY = e.clientY - lastMouseY;
 
+    // Track velocity for momentum
+    velocityX = deltaX * 0.01;
+    velocityY = deltaY * 0.01;
+
     // Apply rotations in screen space (Y for horizontal drag, X for vertical)
-    const dragRotY = rotationMatrixY(-deltaX * 0.01);
-    const dragRotX = rotationMatrixX(deltaY * 0.01);
+    const dragRotY = rotationMatrixY(-velocityX);
+    const dragRotX = rotationMatrixX(velocityY);
     rotationMatrix = multiplyMatrices(dragRotY, rotationMatrix);
     rotationMatrix = multiplyMatrices(dragRotX, rotationMatrix);
 
