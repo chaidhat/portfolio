@@ -281,7 +281,7 @@ function render() {
         for (let x = 0; x < WIDTH; x++) {
             const brightness = edgeMatrix[y][x];
             if (brightness === null) {
-                output += '<span> </span>';
+                output += '<span style="color:#ffffff">█</span>';
             } else {
                 const color = brightnessToColor(brightness);
                 output += `<span style="color:${color}">█</span>`;
