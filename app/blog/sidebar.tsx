@@ -14,7 +14,13 @@ export interface NavChapter {
   pages: NavPage[];
 }
 
-export function Sidebar({ chapters }: { chapters: NavChapter[] }) {
+export function Sidebar({
+  rootPages = [],
+  chapters,
+}: {
+  rootPages?: NavPage[];
+  chapters: NavChapter[];
+}) {
   const pathname = usePathname();
   // The active page (and the chapter it auto-expands) depends on the URL, which
   // isn't known during static prerender. Defer it to after mount so the server
@@ -42,6 +48,20 @@ export function Sidebar({ chapters }: { chapters: NavChapter[] }) {
         {open ? "✕" : "☰"}
       </button>
       <nav className={open ? "sidebar sidebar--open" : "sidebar"}>
+        {rootPages.length > 0 && (
+          <ul className="page-list root-pages">
+            {rootPages.map((p) => (
+              <li key={p.slug}>
+                <Link
+                  href={`/blog/${encodeURIComponent(p.slug)}`}
+                  className={p.slug === activeSlug ? "page-link active" : "page-link"}
+                >
+                  {p.title}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
         {chapters.map((c) => (
           <ChapterGroup key={c.id} chapter={c} activeSlug={activeSlug} />
         ))}

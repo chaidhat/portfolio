@@ -8,7 +8,7 @@ export default function BlogHome() {
     return (
       <div>
         <h1>Nothing here yet</h1>
-        <p>The blog is empty. Add a markdown file under <code>content/</code>.</p>
+        <p>The blog is empty. Add a markdown file under <code>blog/</code>.</p>
       </div>
     );
   }

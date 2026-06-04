@@ -140,6 +140,12 @@
   min-height: 0;
 }
 
+/* top-level pages: no parent chapter, so align with the chapter titles */
+.page-list.root-pages {
+  padding-left: 0;
+  margin-bottom: 0.5rem;
+}
+
 .page-link {
   display: block;
   padding: 0.25rem 0.5rem;
@@ -195,6 +201,14 @@
 .navbar-right {
   color: var(--muted);
   text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.navbar-icon {
+  width: 0.9rem;
+  height: 0.9rem;
 }
 
 .navbar-right:hover {

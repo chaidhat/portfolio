@@ -1,14 +1,14 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-// Blog markdown lives in /content at the repo root. Each numbered folder is a
-// "chapter" (section), each .md file is a page. Filenames are globally unique
-// so a [[wikilink]] maps to exactly one note.
-const MD_ROOT = join(process.cwd(), "content");
+// Blog markdown lives in /blog at the repo root (an Obsidian vault). Each
+// numbered folder is a "chapter" (section), each .md file is a page. Filenames
+// are globally unique so a [[wikilink]] maps to exactly one note.
+const MD_ROOT = join(process.cwd(), "blog");
 
 export interface Page {
   slug: string; // filename without .md, globally unique — matches [[wikilink]] targets
-  title: string; // first "# heading" if present, else derived from slug
+  title: string; // derived from the filename — rendered as the page's H1
   chapterId: string; // e.g. "00-welcome"
   filePath: string; // absolute path on disk
 }
@@ -35,49 +35,55 @@ function chapterTitle(id: string): string {
   return titleCaseFromSlug(name);
 }
 
-// Reduce a heading to plain text: [[target|display]] -> display,
-// [[target]] -> target, [text](url) -> text, and strip stray `code` ticks.
-function cleanTitle(s: string): string {
-  return s
-    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, target, display) =>
-      (display ?? target).trim(),
-    )
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/`/g, "")
-    .trim();
-}
-
-function firstHeading(content: string): string | null {
-  for (const raw of content.split("\n")) {
-    const line = raw.trim();
-    if (line.startsWith("# ")) return cleanTitle(line.slice(2));
-    // a non-empty, non-heading first line means there's no leading H1
-    if (line.length > 0) return null;
+// The page's H1 comes from the filename, so an author-written leading "# ..."
+// would render as a duplicate title. Drop it (and any blank lines above it).
+function stripLeadingH1(markdown: string): string {
+  const lines = markdown.split("\n");
+  let i = 0;
+  while (i < lines.length && lines[i].trim().length === 0) i++;
+  if (i < lines.length && lines[i].trim().startsWith("# ")) {
+    return lines.slice(i + 1).join("\n").replace(/^\n+/, "");
   }
-  return null;
+  return markdown;
 }
 
 // ---- index build (cached per process) ------------------------------------
 
-let _index: { chapters: Chapter[]; bySlug: Map<string, Page> } | null = null;
+let _index: { chapters: Chapter[]; rootPages: Page[]; bySlug: Map<string, Page> } | null = null;
 
 function buildIndex() {
   if (_index) return _index;
 
   const chapters: Chapter[] = [];
+  const rootPages: Page[] = [];
   const bySlug = new Map<string, Page>();
 
-  let dirs: string[] = [];
+  let entries: string[] = [];
   try {
-    dirs = readdirSync(MD_ROOT);
+    entries = readdirSync(MD_ROOT);
   } catch {
-    // no content/ folder yet — the blog is simply empty
-    _index = { chapters, bySlug };
+    // no blog/ folder yet — the blog is simply empty
+    _index = { chapters, rootPages, bySlug };
     return _index;
   }
 
-  dirs = dirs
+  // Top-level .md files (e.g. an Obsidian vault's index note) are pages too —
+  // they live in no chapter and lead the reading order.
+  const rootFiles = entries
+    .filter((f) => f.endsWith(".md"))
+    .sort();
+  for (const f of rootFiles) {
+    const filePath = join(MD_ROOT, f);
+    const slug = f.replace(/\.md$/, "");
+    const page: Page = { slug, title: titleCaseFromSlug(slug), chapterId: "", filePath };
+    rootPages.push(page);
+    bySlug.set(slug, page);
+  }
+
+  const dirs = entries
     .filter((d) => {
+      // skip hidden folders like Obsidian's .obsidian config dir
+      if (d.startsWith(".")) return false;
       try {
         return statSync(join(MD_ROOT, d)).isDirectory();
       } catch {
@@ -96,8 +102,7 @@ function buildIndex() {
     for (const f of files) {
       const filePath = join(dirPath, f);
       const slug = f.replace(/\.md$/, "");
-      const content = readFileSync(filePath, "utf8");
-      const title = firstHeading(content) ?? titleCaseFromSlug(slug);
+      const title = titleCaseFromSlug(slug);
       const page: Page = { slug, title, chapterId: id, filePath };
       pages.push(page);
       bySlug.set(slug, page);
@@ -122,7 +127,7 @@ function buildIndex() {
   }
 
   chapters.sort((a, b) => a.order - b.order);
-  _index = { chapters, bySlug };
+  _index = { chapters, rootPages, bySlug };
   return _index;
 }
 
@@ -130,8 +135,14 @@ export function getChapters(): Chapter[] {
   return buildIndex().chapters;
 }
 
+// Top-level pages that belong to no chapter, in reading order before chapters.
+export function getRootPages(): Page[] {
+  return buildIndex().rootPages;
+}
+
 export function getAllPages(): Page[] {
-  return buildIndex().chapters.flatMap((c) => c.pages);
+  const { rootPages, chapters } = buildIndex();
+  return [...rootPages, ...chapters.flatMap((c) => c.pages)];
 }
 
 export function getPage(slug: string): Page | undefined {
@@ -151,13 +162,12 @@ export function getPageContent(slug: string): { page: Page; markdown: string } |
   const page = getPage(slug);
   if (!page) return null;
   const raw = readFileSync(page.filePath, "utf8");
-  return { page, markdown: rewriteWikilinks(raw) };
+  return { page, markdown: stripLeadingH1(rewriteWikilinks(raw)) };
 }
 
 // The default landing page: the first page in the blog, or "" if empty.
 export function getHomeSlug(): string {
-  const chapters = getChapters();
-  return chapters[0]?.pages[0]?.slug ?? "";
+  return getAllPages()[0]?.slug ?? "";
 }
 
 // ---- wikilink rewriting ---------------------------------------------------

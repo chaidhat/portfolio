@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ArrowLeftIcon } from "@heroicons/react/16/solid";
 import "katex/dist/katex.min.css";
 import "./blog.css";
-import { getChapters } from "@/lib/content";
+import { getChapters, getRootPages } from "@/lib/content";
 import { Sidebar } from "./sidebar";
 
 export const metadata: Metadata = {
@@ -17,16 +18,18 @@ export default function BlogLayout({ children }: { children: React.ReactNode }) 
     title: c.title,
     pages: c.pages.map((p) => ({ slug: p.slug, title: p.title })),
   }));
+  const rootPages = getRootPages().map((p) => ({ slug: p.slug, title: p.title }));
   return (
     <div className="layout">
-      <Sidebar chapters={chapters} />
+      <Sidebar rootPages={rootPages} chapters={chapters} />
       <main className="content">
         <nav className="navbar">
           <Link href="/blog" className="navbar-left">
-            chai · blog
+            chaidhat · blog
           </Link>
           <Link href="/" className="navbar-right">
-            ← home
+            <ArrowLeftIcon className="navbar-icon" aria-hidden="true" />
+            home
           </Link>
         </nav>
         <article className="prose">{children}</article>

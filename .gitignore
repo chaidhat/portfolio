@@ -5,3 +5,6 @@
 next-env.d.ts
 *.tsbuildinfo
 .DS_Store
+
+# Obsidian vault local state (the blog/ folder is an Obsidian vault)
+.obsidian/

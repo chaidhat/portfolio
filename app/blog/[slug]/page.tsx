@@ -29,6 +29,7 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
   const next = getNextPage(decoded);
   return (
     <>
+      <h1 className="page-title">{result.page.title}</h1>
       <Markdown>{result.markdown}</Markdown>
       <nav className="page-next">
         {next ? (
