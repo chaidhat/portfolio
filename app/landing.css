@@ -1,0 +1,30 @@
+/* The landing page: the ASCII cube and the link list, centered. Scoped under
+   .landing so none of it leaks into the blog (which has its own globals). */
+.landing {
+  background-color: white;
+  color: black;
+  font-family: "Courier New", monospace;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.landing #canvas {
+  font-size: 1.5dvh;
+  line-height: 120%;
+  letter-spacing: 0;
+  white-space: pre;
+  user-select: none;
+  flex-shrink: 0;
+  height: 57.6dvh;
+  overflow: hidden;
+  cursor: grab;
+}
+
+@media (max-width: 768px) {
+  .landing {
+    flex-direction: column-reverse;
+  }
+}

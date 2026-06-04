@@ -1,0 +1,448 @@
+/* Blog styling — ported from the quantum wiki. Base typography is applied to
+   .layout (not body) so it stays scoped to /blog and never touches the landing
+   page, which shares the same <body>. Free to drift from quantum over time. */
+:root {
+  --bg: #ffffff;
+  --bg-side: #f7f7f5;
+  --border: #e4e4e0;
+  --text: #1f2328;
+  --muted: #6b7280;
+  --link: #ff8345;
+  --link-broken: #dc2626;
+  --accent-bg: #fff1ea;
+  --code-bg: #f3f4f6;
+  --sidebar-w: 300px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111111;
+    --bg-side: #161719;
+    --border: #2c2e33;
+    --text: #e6e6e6;
+    --muted: #9aa0a6;
+    --link: #ff8345;
+    --link-broken: #ff6b6b;
+    --accent-bg: #2e231c;
+    --code-bg: #242629;
+  }
+}
+
+.layout {
+  display: flex;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist), -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+/* divider between sidebar and reader, inset 0.5rem (py-2) top and bottom */
+.layout::after {
+  content: "";
+  position: fixed;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  left: var(--sidebar-w);
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+/* ---- sidebar ---- */
+.sidebar {
+  width: var(--sidebar-w);
+  flex: 0 0 var(--sidebar-w);
+  background: var(--bg);
+  padding: 1.25rem 0.75rem 3rem;
+  overflow-y: auto;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  /* hide scrollbar but keep scrolling (Firefox / IE) */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* hide scrollbar (WebKit: Chrome, Safari) */
+.sidebar::-webkit-scrollbar {
+  display: none;
+}
+
+/* mobile-only hamburger toggle; hidden on desktop where the sidebar is fixed */
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 50;
+  width: 2.4rem;
+  height: 2.4rem;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  line-height: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.chapter {
+  margin-bottom: 0.15rem;
+}
+
+.chapter-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: var(--text);
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+}
+
+.chapter-title:hover {
+  background: #80808020;
+}
+
+.chapter-caret {
+  font-size: 0.7rem;
+  color: var(--muted);
+  width: 0.8rem;
+}
+
+/* animate folder open/close via the 0fr <-> 1fr grid-row trick */
+.page-list-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+
+.page-list-wrap.open {
+  grid-template-rows: 1fr;
+}
+
+.page-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 2.2rem;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.page-link {
+  display: block;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+.page-link:hover {
+  background: #80808020;
+}
+
+.page-link.active {
+  background: #80808020;
+}
+
+/* ---- content ---- */
+.content {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2.5rem 2rem 6rem;
+  min-width: 0;
+}
+
+/* ---- navbar ---- */
+.navbar {
+  width: 100%;
+  max-width: 680px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-garamond), Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+}
+
+.navbar-left {
+  font-weight: 400;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.navbar-left:hover {
+  text-decoration: underline;
+}
+
+.navbar-right {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.navbar-right:hover {
+  text-decoration: underline;
+}
+
+.prose {
+  width: 100%;
+  max-width: 680px;
+  min-width: 0;
+}
+
+/* ---- captioned figures ---- */
+.md-figure {
+  margin: 1.5rem 0;
+}
+
+.md-figure img {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  display: block;
+}
+
+.md-figure figcaption {
+  margin-top: 0.6rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  text-align: center;
+}
+
+.prose h1,
+.prose h2,
+.prose h3 {
+  font-family: var(--font-garamond), Georgia, "Times New Roman", serif;
+}
+
+.prose h1 {
+  font-size: 2rem;
+  margin: 2rem 0 1.2rem;
+  line-height: 1.2;
+}
+
+.prose h2 {
+  font-size: 1.45rem;
+  margin: 2rem 0 0.8rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.prose h3 {
+  font-size: 1.18rem;
+  margin: 2rem 0 0.6rem;
+}
+
+.prose p {
+  margin: 0.8rem 0;
+}
+
+.prose a {
+  color: var(--link);
+  text-decoration: none;
+}
+
+.prose a:hover {
+  text-decoration: underline;
+}
+
+.wikilink.broken {
+  color: var(--link-broken);
+  border-bottom: 1px dotted var(--link-broken);
+}
+
+.prose ul,
+.prose ol {
+  padding-left: 1.5rem;
+}
+
+.prose li {
+  margin: 0.3rem 0;
+}
+
+.prose code {
+  background: var(--code-bg);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.prose pre {
+  background: var(--code-bg);
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.prose pre code {
+  background: none;
+  padding: 0;
+}
+
+.prose blockquote {
+  margin: 1rem 0;
+  padding: 0.2rem 1rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+
+.prose table {
+  border-collapse: collapse;
+  margin: 1rem 0;
+  width: 100%;
+}
+
+.prose th,
+.prose td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.7rem;
+  text-align: left;
+}
+
+.prose img {
+  max-width: 100%;
+}
+
+/* ---- next-page button ---- */
+.page-next {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.page-next-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.7rem;
+  /* accent color (#ff8345) at 10% alpha, no border in any state */
+  background: rgba(255, 131, 69, 0.1);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.85rem;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+
+/* scoped under .prose to outrank `.prose a:hover` (which adds an underline) */
+.prose .page-next-link:hover {
+  opacity: 0.55;
+  text-decoration: none;
+}
+
+.page-next-icon {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+/* KaTeX display math: allow horizontal scroll on small screens */
+.prose .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+/* On wide screens, center the column on the whole viewport rather than on the
+   region right of the sidebar. Shift left by half the sidebar width. Only kicks
+   in past 1300px, where the column still clears the sidebar after shifting. */
+@media (min-width: 1300px) {
+  .content {
+    transform: translateX(calc(var(--sidebar-w) / -2));
+    /* the shifted box now overlaps the sidebar's right edge; let clicks in its
+       empty padding fall through, but keep the actual content interactive */
+    pointer-events: none;
+  }
+  .content > * {
+    pointer-events: auto;
+  }
+}
+
+/* ---- responsive ---- */
+@media (max-width: 800px) {
+  .layout {
+    flex-direction: column;
+  }
+  .layout::after {
+    display: none;
+  }
+  .sidebar-toggle {
+    display: flex;
+  }
+  /* drawer: always in the DOM but slid off-screen so it can animate in/out */
+  .sidebar {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    width: 100%;
+    height: 100vh;
+    max-height: none;
+    overflow-y: auto;
+    background: var(--bg);
+    padding: 3.5rem 0.75rem 2rem;
+    border: none;
+    transform: translateX(-100%);
+    visibility: hidden;
+    /* slide out, then hide; opening overrides this to reveal immediately */
+    transition: transform 0.28s ease, visibility 0s linear 0.28s;
+  }
+  .sidebar.sidebar--open {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform 0.28s ease;
+  }
+  /* leave room for the fixed toggle button above the content */
+  .content {
+    padding: 3.5rem 1.1rem 4rem;
+  }
+  /* navbar wraps instead of colliding; right credit can drop to a new line */
+  .navbar {
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    font-size: 0.8rem;
+  }
+  .prose h1 {
+    font-size: 1.6rem;
+  }
+  .prose h2 {
+    font-size: 1.3rem;
+  }
+  .prose h3 {
+    font-size: 1.1rem;
+  }
+  /* wide tables scroll horizontally rather than overflowing the viewport */
+  .prose table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}
+
+/* respect users who prefer no motion: snap instead of animating */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar.sidebar--open,
+  .page-list-wrap {
+    transition: none;
+  }
+}

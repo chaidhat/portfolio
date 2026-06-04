@@ -1,27 +1,34 @@
 {
   "name": "portfolio",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "private": true,
+  "description": "chaidhat.com — landing page + markdown blog",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chaidhat/portfolio.git"
   },
-  "keywords": [],
-  "author": "",
+  "author": "Chaidhat Chaimongkol",
   "license": "ISC",
-  "type": "commonjs",
-  "bugs": {
-    "url": "https://github.com/chaidhat/portfolio/issues"
+  "dependencies": {
+    "@heroicons/react": "^2.2.0",
+    "katex": "^0.16.11",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^9.0.1",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.0",
+    "remark-math": "^6.0.0"
   },
-  "homepage": "https://github.com/chaidhat/portfolio#readme",
   "devDependencies": {
-    "vite": "^7.2.7"
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.0"
   }
 }

@@ -1,0 +1,11 @@
+/* Root-level resets only. Page-specific styling lives with each route:
+   the landing page in app/landing.css, the blog in app/blog/blog.css. */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
