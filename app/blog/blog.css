@@ -5,7 +5,8 @@
   --bg: #ffffff;
   --bg-side: #f7f7f5;
   --border: #e4e4e0;
-  --text: #111;
+  --text: #555;
+  --heading: #111;
   --muted: #6b7280;
   --link: #ff8345;
   --link-broken: #dc2626;
@@ -20,6 +21,7 @@
     --bg-side: #161719;
     --border: #2c2e33;
     --text: #e6e6e6;
+    --heading: #f5f5f5;
     --muted: #9aa0a6;
     --link: #ff8345;
     --link-broken: #ff6b6b;
@@ -244,6 +246,7 @@
 .prose h2,
 .prose h3 {
   font-family: var(--font-garamond), Georgia, "Times New Roman", serif;
+  color: var(--heading);
 }
 
 .prose h1 {
@@ -264,8 +267,13 @@
   margin: 2rem 0 0.6rem;
 }
 
+.page-date {
+  margin: -0.5rem 0 1.5rem;
+  color: #888;
+}
+
 .prose p {
-  margin: 0.8rem 0;
+  margin: 1.5rem 0;
 }
 
 .prose a {

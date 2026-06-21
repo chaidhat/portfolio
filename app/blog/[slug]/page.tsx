@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { ArrowRightIcon } from "@heroicons/react/16/solid";
-import { getAllPages, getPageContent, getPage, getNextPage } from "@/lib/content";
+import { getAllPages, getPageContent, getPage, getNextPage, writtenAgo } from "@/lib/content";
 import { Markdown } from "../markdown";
 
 export const dynamicParams = false;
@@ -27,9 +27,12 @@ export default async function BlogPost({ params }: { params: Promise<{ slug: str
   const result = getPageContent(decoded);
   if (!result) notFound();
   const next = getNextPage(decoded);
+  // No "written X ago" on the index/landing note — only on actual posts.
+  const written = /^_?index$/i.test(result.page.slug) ? null : writtenAgo(result.page.date);
   return (
     <>
       <h1 className="page-title">{result.page.title}</h1>
+      {written && <p className="page-date">{written}</p>}
       <Markdown>{result.markdown}</Markdown>
       <nav className="page-next">
         {next ? (

@@ -191,6 +191,21 @@ export function getPage(slug: string): Page | undefined {
   return buildIndex().bySlug.get(slug);
 }
 
+// A human "written X ago" string from a YYYY-MM-DD frontmatter date, relative to
+// build time. Returns null when there's no date. (Static pages, so it's accurate
+// as of the last deploy.)
+export function writtenAgo(date: string): string | null {
+  if (!date) return null;
+  const then = new Date(date);
+  if (isNaN(then.getTime())) return null;
+  const days = Math.floor((Date.now() - then.getTime()) / 86_400_000);
+  if (days <= 0) return "written today";
+  const unit = (n: number, name: string) => `written ${n} ${name}${n === 1 ? "" : "s"} ago`;
+  if (days < 30) return unit(days, "day");
+  if (days < 365) return unit(Math.floor(days / 30), "month");
+  return unit(Math.floor(days / 365), "year");
+}
+
 // The page after `slug` in the global reading order (chapters in order, pages
 // in their per-chapter order). Returns null if `slug` is the last page.
 export function getNextPage(slug: string): Page | null {
