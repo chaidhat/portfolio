@@ -158,11 +158,23 @@ export function getNextPage(slug: string): Page | null {
   return all[i + 1];
 }
 
+// Expands a {{toc}} token into a bullet list linking to every other page, in
+// reading order. Lets a page (e.g. the home note) carry an auto-updating table
+// of contents without hardcoding the list — it tracks the files on disk.
+function expandToc(markdown: string, currentSlug: string): string {
+  if (!markdown.includes("{{toc}}")) return markdown;
+  const items = getAllPages()
+    .filter((p) => p.slug !== currentSlug)
+    .map((p) => `- [${p.title}](/blog/${encodeURIComponent(p.slug)})`)
+    .join("\n");
+  return markdown.replace(/\{\{toc\}\}/g, items);
+}
+
 export function getPageContent(slug: string): { page: Page; markdown: string } | null {
   const page = getPage(slug);
   if (!page) return null;
   const raw = readFileSync(page.filePath, "utf8");
-  return { page, markdown: stripLeadingH1(rewriteWikilinks(raw)) };
+  return { page, markdown: stripLeadingH1(rewriteWikilinks(expandToc(raw, slug))) };
 }
 
 // The default landing page: the first page in the blog, or "" if empty.
