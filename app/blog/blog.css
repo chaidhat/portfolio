@@ -5,7 +5,7 @@
   --bg: #ffffff;
   --bg-side: #f7f7f5;
   --border: #e4e4e0;
-  --text: #1f2328;
+  --text: #111;
   --muted: #6b7280;
   --link: #ff8345;
   --link-broken: #dc2626;
@@ -155,6 +155,12 @@
   border-radius: 6px;
 }
 
+/* the file extension, shown greyed-out after each page name — a little gimmick
+   that reveals every note is really just a markdown file */
+.page-ext {
+  color: var(--muted);
+}
+
 .page-link:hover {
   background: #80808020;
 }
@@ -176,7 +182,7 @@
 /* ---- navbar ---- */
 .navbar {
   width: 100%;
-  max-width: 680px;
+  max-width: 480px;
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -217,7 +223,7 @@
 
 .prose {
   width: 100%;
-  max-width: 680px;
+  max-width: 480px;
   min-width: 0;
 }
 
@@ -229,7 +235,7 @@
 .md-figure img {
   width: 100%;
   height: auto;
-  border-radius: 8px;
+  border-radius: 0.125rem; /* rounded-sm */
   display: block;
 }
 
@@ -333,7 +339,7 @@
 
 .prose img {
   max-width: 100%;
-  border-radius: 8px;
+  border-radius: 0.125rem; /* rounded-sm */
 }
 
 /* ---- next-page button ---- */

@@ -11,6 +11,7 @@ export interface Page {
   title: string; // derived from the filename — rendered as the page's H1
   chapterId: string; // e.g. "00-welcome"
   filePath: string; // absolute path on disk
+  date: string; // frontmatter `date:` (YYYY-MM-DD), or "" — drives chronological order
 }
 
 export interface Chapter {
@@ -33,6 +34,33 @@ function chapterTitle(id: string): string {
   // strip leading "NN-" then title-case
   const name = id.replace(/^\d+-/, "");
   return titleCaseFromSlug(name);
+}
+
+// Minimal YAML-ish frontmatter parser: pulls simple `key: value` pairs from a
+// leading `---`-delimited block. Enough for the optional `date:` we sort by;
+// returns the remaining body so the delimiters never reach the renderer.
+function parseFrontmatter(raw: string): { data: Record<string, string>; body: string } {
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!m) return { data: {}, body: raw };
+  const data: Record<string, string> = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+    const key = line.slice(0, idx).trim();
+    const val = line.slice(idx + 1).trim().replace(/^["']|["']$/g, "");
+    if (key) data[key] = val;
+  }
+  return { data, body: raw.slice(m[0].length) };
+}
+
+// Reads just the `date` frontmatter for index-time sorting. Missing/unreadable
+// → "" (those notes sort to the bottom of the newest-first order).
+function readDate(filePath: string): string {
+  try {
+    return parseFrontmatter(readFileSync(filePath, "utf8")).data.date ?? "";
+  } catch {
+    return "";
+  }
 }
 
 // The page's H1 comes from the filename, so an author-written leading "# ..."
@@ -69,16 +97,31 @@ function buildIndex() {
 
   // Top-level .md files (e.g. an Obsidian vault's index note) are pages too —
   // they live in no chapter and lead the reading order.
-  const rootFiles = entries
-    .filter((f) => f.endsWith(".md"))
-    .sort();
+  const rootFiles = entries.filter((f) => f.endsWith(".md"));
   for (const f of rootFiles) {
     const filePath = join(MD_ROOT, f);
     const slug = f.replace(/\.md$/, "");
-    const page: Page = { slug, title: titleCaseFromSlug(slug), chapterId: "", filePath };
+    // Title is the raw filename (the slug) — no title-casing, so the page H1
+    // and tab title read exactly as the file on disk.
+    const page: Page = {
+      slug,
+      title: slug,
+      chapterId: "",
+      filePath,
+      date: readDate(filePath),
+    };
     rootPages.push(page);
     bySlug.set(slug, page);
   }
+  // The index note (e.g. "index" or Hugo's "_index") is pinned to the very top;
+  // everything else sorts newest-first by its frontmatter `date` (undated notes
+  // sink to the bottom).
+  const isIndex = (slug: string) => /^_?index$/i.test(slug);
+  rootPages.sort((a, b) => {
+    if (isIndex(a.slug)) return -1;
+    if (isIndex(b.slug)) return 1;
+    return (b.date || "").localeCompare(a.date || "");
+  });
 
   const dirs = entries
     .filter((d) => {
@@ -102,19 +145,18 @@ function buildIndex() {
     for (const f of files) {
       const filePath = join(dirPath, f);
       const slug = f.replace(/\.md$/, "");
-      const title = titleCaseFromSlug(slug);
-      const page: Page = { slug, title, chapterId: id, filePath };
+      const page: Page = { slug, title: slug, chapterId: id, filePath, date: readDate(filePath) };
       pages.push(page);
       bySlug.set(slug, page);
     }
 
     // Sort pages: a page whose slug matches the chapter name (the chapter's
-    // landing note) floats to the top, otherwise alphabetical.
+    // landing note) floats to the top, otherwise newest-first by date.
     const landing = id.replace(/^\d+-/, "");
     pages.sort((a, b) => {
       if (a.slug === landing) return -1;
       if (b.slug === landing) return 1;
-      return a.title.localeCompare(b.title);
+      return (b.date || "").localeCompare(a.date || "");
     });
 
     const m = id.match(/^(\d+)-/);
@@ -173,8 +215,8 @@ function expandToc(markdown: string, currentSlug: string): string {
 export function getPageContent(slug: string): { page: Page; markdown: string } | null {
   const page = getPage(slug);
   if (!page) return null;
-  const raw = readFileSync(page.filePath, "utf8");
-  return { page, markdown: stripLeadingH1(rewriteWikilinks(expandToc(raw, slug))) };
+  const { body } = parseFrontmatter(readFileSync(page.filePath, "utf8"));
+  return { page, markdown: stripLeadingH1(rewriteWikilinks(expandToc(body, slug))) };
 }
 
 // The default landing page: the first page in the blog, or "" if empty.

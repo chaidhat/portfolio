@@ -56,7 +56,8 @@ export function Sidebar({
                   href={`/blog/${encodeURIComponent(p.slug)}`}
                   className={p.slug === activeSlug ? "page-link active" : "page-link"}
                 >
-                  {p.title}
+                  {p.slug}
+                  <span className="page-ext">.md</span>
                 </Link>
               </li>
             ))}
@@ -99,7 +100,8 @@ function ChapterGroup({ chapter, activeSlug }: { chapter: NavChapter; activeSlug
                 href={`/blog/${encodeURIComponent(p.slug)}`}
                 className={p.slug === activeSlug ? "page-link active" : "page-link"}
               >
-                {p.title}
+                {p.slug}
+                <span className="page-ext">.md</span>
               </Link>
             </li>
           ))}
