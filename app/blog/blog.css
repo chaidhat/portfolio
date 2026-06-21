@@ -155,12 +155,6 @@
   border-radius: 6px;
 }
 
-/* the file extension, shown greyed-out after each page name — a little gimmick
-   that reveals every note is really just a markdown file */
-.page-ext {
-  color: var(--muted);
-}
-
 .page-link:hover {
   background: #80808020;
 }

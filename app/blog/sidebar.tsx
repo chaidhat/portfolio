@@ -57,7 +57,6 @@ export function Sidebar({
                   className={p.slug === activeSlug ? "page-link active" : "page-link"}
                 >
                   {p.slug}
-                  <span className="page-ext">.md</span>
                 </Link>
               </li>
             ))}
@@ -101,7 +100,6 @@ function ChapterGroup({ chapter, activeSlug }: { chapter: NavChapter; activeSlug
                 className={p.slug === activeSlug ? "page-link active" : "page-link"}
               >
                 {p.slug}
-                <span className="page-ext">.md</span>
               </Link>
             </li>
           ))}
