@@ -56,9 +56,17 @@ export function Markdown({ children }: { children: string }) {
           );
         },
         a({ href, children, title, ...props }) {
-          const isInternal = href && href.startsWith("/");
           const broken = typeof title === "string" && title.startsWith("missing:");
-          if (isInternal) {
+          // In-page anchor (a rewritten wikilink) — scroll, don't open a new tab.
+          if (href && href.startsWith("#")) {
+            return (
+              <a href={href} className={broken ? "wikilink broken" : "wikilink"} title={title}>
+                {children}
+              </a>
+            );
+          }
+          // Same-origin path → client navigation via next/link.
+          if (href && href.startsWith("/")) {
             return (
               <Link href={href} className={broken ? "wikilink broken" : "wikilink"} title={title}>
                 {children}
